@@ -1,0 +1,53 @@
+{
+  "name": "image-atlas-desktop",
+  "productName": "Image Atlas",
+  "version": "0.1.0",
+  "description": "Whiteboards, mapas mentais, notas Markdown e revisão FSRS local.",
+  "author": "Douglas",
+  "private": true,
+  "main": "src/main.cjs",
+  "scripts": {
+    "build": "node scripts/build.cjs",
+    "start": "npm run build && electron .",
+    "test": "node --test tests/*.test.cjs",
+    "dist": "node scripts/package.cjs",
+    "pack": "npm run build && electron-builder --dir --win --x64"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "electron-builder": "26.18.0",
+    "esbuild": "^0.25.0",
+    "dompurify": "^3.3.0",
+    "marked": "^16.0.0",
+    "yaml": "^2.8.0",
+    "lucide": "^0.468.0"
+  },
+  "build": {
+    "appId": "com.douglas.imageatlas",
+    "productName": "Image Atlas",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "src/main.cjs",
+      "src/preload.cjs",
+      "src/storage.cjs",
+      "package.json",
+      "resources/**/*"
+    ],
+    "asar": true,
+    "win": {
+      "target": "nsis",
+      "artifactName": "Image-Atlas-${version}-Setup.${ext}",
+      "signExecutable": false,
+      "icon": "resources/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}
