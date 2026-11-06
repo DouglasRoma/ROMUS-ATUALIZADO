@@ -18,7 +18,7 @@ async function launch(){
  // Keep interface rasterization at native scale; embedded readers own their zoom.
  win.webContents.setZoomMode('isolated');
  win.webContents.on('did-finish-load',()=>win.webContents.setZoomFactor(1));
- win.removeMenu();win.once('ready-to-show',()=>{if(!process.env.IMAGE_ATLAS_TEST_HOME)win.show()});
+ win.removeMenu();win.once('ready-to-show',()=>{if(!process.env.IMAGE_ATLAS_TEST_HOME){win.show();win.focus()}});
  if(process.env.IMAGE_ATLAS_DEV==='1')win.show();
  win.webContents.setWindowOpenHandler(({url})=>{if(/^https?:\/\//.test(url))shell.openExternal(url);return{action:'deny'}});
  win.webContents.on('will-navigate',(event,url)=>{if(url!==win.webContents.getURL()){event.preventDefault();if(/^https?:\/\//.test(url))shell.openExternal(url)}});
@@ -135,4 +135,4 @@ async function launch(){
  });
  await win.loadFile(path.join(__dirname,'../dist/index.html'));
 }
-if(!app.requestSingleInstanceLock())app.quit();else{app.on('second-instance',()=>{if(win){win.show();win.focus()}});app.whenReady().then(launch).catch(error=>{dialog.showErrorBox('ROMUS',error.message);app.quit()});app.on('window-all-closed',()=>app.quit())}
+if(!app.requestSingleInstanceLock())app.quit();else{app.on('second-instance',()=>{if(win){if(win.isMinimized())win.restore();win.show();win.focus()}});app.whenReady().then(launch).catch(error=>{dialog.showErrorBox('ROMUS',error.message);app.quit()});app.on('window-all-closed',()=>app.quit())}
