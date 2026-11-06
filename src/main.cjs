@@ -14,12 +14,14 @@ async function launch(){
  try{config=JSON.parse(await fs.readFile(configPath(),'utf8'))}catch(e){if(e.code!=='ENOENT')throw e}
  library=new Library(config.library||path.join(app.getPath('userData'),'libraries/default'));await library.list();
  protocol.handle('atlas-data',async request=>{try{const url=new URL(request.url);if(url.hostname!=='library')return new Response('',{status:403});const file=await library.resolve(decodeURIComponent(url.pathname.slice(1)));return net.fetch(pathToFileURL(file).href)}catch{return new Response('',{status:404})}});
- win=new BrowserWindow({width:1450,height:940,minWidth:800,minHeight:600,backgroundColor:'#0d0d0d',title:'ROMUS',titleBarStyle:'hidden',titleBarOverlay:{color:'#0d0d0d',symbolColor:'#a1a9b5',height:47},icon:path.join(__dirname,'../resources/icon.ico'),show:false,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true}});
+ win=new BrowserWindow({width:1450,height:940,minWidth:800,minHeight:600,backgroundColor:'#0d0d0d',title:'ROMUS',titleBarStyle:'hidden',titleBarOverlay:{color:'#0d0d0d',symbolColor:'#a1a9b5',height:47},icon:path.join(__dirname,'../resources/icon.ico'),show:true,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true}});
  // Keep interface rasterization at native scale; embedded readers own their zoom.
  win.webContents.setZoomMode('isolated');
  win.webContents.on('did-finish-load',()=>win.webContents.setZoomFactor(1));
- win.removeMenu();win.once('ready-to-show',()=>{if(!process.env.IMAGE_ATLAS_TEST_HOME){win.show();win.focus()}});
- if(process.env.IMAGE_ATLAS_DEV==='1')win.show();
+ win.removeMenu();
+ win.webContents.on('console-message',(e,level,msg)=>console.log('[RENDERER]',msg));
+ win.webContents.on('did-fail-load',(e,code,desc)=>console.error('[FAIL LOAD]',code,desc));
+ if(!process.env.IMAGE_ATLAS_TEST_HOME){win.show();win.focus();}
  win.webContents.setWindowOpenHandler(({url})=>{if(/^https?:\/\//.test(url))shell.openExternal(url);return{action:'deny'}});
  win.webContents.on('will-navigate',(event,url)=>{if(url!==win.webContents.getURL()){event.preventDefault();if(/^https?:\/\//.test(url))shell.openExternal(url)}});
  win.webContents.on('will-attach-webview',(event,prefs,params)=>{if(!/^https?:\/\//.test(params.src)){event.preventDefault();return}delete prefs.preload;prefs.nodeIntegration=false;prefs.contextIsolation=true;prefs.sandbox=true});
