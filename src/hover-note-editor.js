@@ -67,7 +67,7 @@ export function installHoverNoteEditor(app){
   const record={root:preview,file,detach,origin,parent:recordAt(origin),beforeFocus:document.activeElement};previews.set(preview,record);
   const title=preview.querySelector('.ia-review-note-preview-title')||preview.createDiv({cls:'ia-review-note-preview-title'});title.empty();title.classList.add('atlas-preview-heading');
   record.title=title.createSpan({cls:'atlas-preview-title-text',text:file.basename,attr:{title:file.basename}});
-  record.tools=title.createDiv({cls:'atlas-preview-inline-tools'});
+  record.tools=title.createDiv({cls:'atlas-preview-inline-tools'});record.openBeside=button(record.tools,'Abrir nota ao lado','panel-right-open',()=>app.openNoteLink(file.path,origin?.closest('[data-preview-note-path]')?.dataset.previewNotePath||app.workspace.getActiveFile()?.path||''));
   record.pin=button(record.tools,'Fixar prévia','pin',()=>{
    retain(record);record.pinned=!record.pinned;preview.toggleAttribute('data-pinned',record.pinned);
    const label=record.pinned?'Desafixar prévia':'Fixar prévia';record.pin.title=label;record.pin.setAttribute('aria-label',label);record.pin.setAttribute('aria-pressed',String(record.pinned));setIcon(record.pin,record.pinned?'pin-off':'pin');
@@ -81,7 +81,7 @@ export function installHoverNoteEditor(app){
     event.preventDefault();event.stopImmediatePropagation();retain(record);
     app.workspace.trigger('hover-link',{event,targetEl:link,linktext:link.dataset.href,sourcePath:record.file.path});return;
    }
-   if(record.editor||event.target.closest('a,button,img,input,textarea,.atlas-preview-heading,.ia-review-note-preview-tip'))return;
+   if(record.editor||event.target.closest('a,button,img,input,textarea,.atlas-preview-heading,.ia-review-note-preview-tip,.romus-board-note-tabs,.romus-preview-tabs,.romus-note-hub,.romus-wiki-view'))return;if(preview.dataset.previewTab&&preview.dataset.previewTab!=='summary')return;
    if(!window.getSelection()?.isCollapsed)return;
    event.preventDefault();event.stopImmediatePropagation();
    const block=event.target.closest('p,li,h1,h2,h3,h4,h5,h6,pre'),location={text:block?.textContent||'',offset:0},point=document.caretPositionFromPoint?.(event.clientX,event.clientY);

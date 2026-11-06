@@ -72,6 +72,10 @@ export class NoteEditor extends TextFileView{
   queueSave(){clearTimeout(this.timer);this.status.textContent='Salvando…';this.timer=setTimeout(()=>this.save().catch(error=>{this.status.textContent=error.message;new Notice(error.message)}),400)}
   async save(){
     this.formatted?.flushToOwner(false);
+    if(this.notePage?.wikiEditor){
+      this.notePage.wikiEditor.flushToOwner(false);
+      await this.notePage.saveWiki?.();
+    }
     await Promise.all(this.imageJobs||[]);
     this.formatted?.flushToOwner(false);
     clearTimeout(this.timer);

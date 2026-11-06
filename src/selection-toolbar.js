@@ -11,7 +11,7 @@ export const TextPaint=Mark.create({
  addAttributes(){return{color:{default:null,parseHTML:originalTextColor},background:{default:null,parseHTML:el=>el.style.backgroundColor||(el.tagName==='MARK'?'#dfbf55':null)},autoForeground:{default:null,parseHTML:el=>el.getAttribute('data-atlas-highlight')==='manual'?false:el.style.backgroundColor||el.tagName==='MARK'?true:null}}},
  parseHTML(){return[{tag:'span[style]',getAttrs:el=>el.style.color||el.style.backgroundColor?{}:false},{tag:'mark'}]},
  renderHTML({HTMLAttributes}){const {color,background,autoForeground,...rest}=HTMLAttributes;return['span',mergeAttributes(rest,textPaintAttributes({color,background,autoForeground})),0]},
- renderMarkdown(node,h){const escape=value=>String(value).replace(/[&"<>]/g,c=>({'&':'&amp;','"':'&quot;','<':'&lt;','>':'&gt;'}[c])),attrs=textPaintAttributes(node.attrs);return`<span ${Object.entries(attrs).map(([key,value])=>`${key}="${escape(value)}"`).join(' ')}>${h.renderChildren(node)}</span>`}
+ renderMarkdown(node,h){const escape=value=>String(value).replace(/[&"<>]/g,c=>({'&':'&amp;','"':'&quot;','<':'&lt;','>':'&gt;'}[c])),attrs=textPaintAttributes(node.attrs);return`<span ${Object.entries(attrs).map(([key,value])=>`${key}="${escape(value)}"`).join(' ')}>${h.renderChildren()}</span>`}
 });
 export class SelectionToolbar{
  constructor(owner){
@@ -27,7 +27,7 @@ export class SelectionToolbar{
   block.onchange=()=>{const value=block.value,chain=this.editor.chain().focus();if(/^h[1-6]$/.test(value))chain.toggleHeading({level:Number(value[1])}).run();else({paragraph:()=>chain.setParagraph().run(),bullet:()=>chain.toggleBulletList().run(),ordered:()=>chain.toggleOrderedList().run(),task:()=>chain.toggleTaskList().run(),quote:()=>chain.toggleBlockquote().run(),code:()=>chain.toggleCodeBlock().run()})[value]?.();block.value='';this.update()};
   this.colorInput('Cor da fonte','color','#75b8ff');this.colorInput('Cor de fundo','background','#d9b84a');
   button('Inserir link','link',()=>this.openLink());
-  button('Criar ou vincular nota ao lado','file-plus',()=>{const {from,to}=this.editor.state.selection,title=this.editor.state.doc.textBetween(from,to,' ').trim();if(!title)return;this.editor.chain().focus(undefined,{scrollIntoView:false}).setLink({href:'atlas-note:'+encodeURIComponent(title)}).run();this.owner.flushToOwner();this.owner.app.openNoteLink(title,this.owner.owner.file.path).catch(error=>{this.owner.owner.status.textContent=error.message})});
+  button('Criar ou vincular nota ao lado','file-plus',()=>{const {from,to}=this.editor.state.selection,title=this.editor.state.doc.textBetween(from,to,' ').trim();if(!title)return;this.editor.chain().focus(undefined,{scrollIntoView:false}).setLink({href:'atlas-note:'+encodeURIComponent(title)}).run();this.owner.dirty=true;this.owner.flushToOwner();this.owner.decorateLinks();this.owner.app.openNoteLink(title,this.owner.owner.file?.path||'').catch(error=>{if(this.owner.owner?.status)this.owner.owner.status.textContent=error.message})});
    button('Vincular à Wikipedia','wikipedia',()=>{
     const {from,to}=this.editor.state.selection,term=this.editor.state.doc.textBetween(from,to,' ').trim();
     openWikipediaModal(this.owner.app,{
@@ -36,21 +36,25 @@ export class SelectionToolbar{
       const noteTitle=article.title||term;
       if(!noteTitle)return;
       if(from!==to){
-       this.editor.chain().focus(undefined,{scrollIntoView:false}).setLink({href:'atlas-note:'+encodeURIComponent(noteTitle)}).run();
+       this.editor.chain().focus(undefined,{scrollIntoView:false}).setTextSelection({from,to}).setLink({href:'atlas-note:'+encodeURIComponent(noteTitle)}).run();
+       this.owner.dirty=true;
        this.owner.flushToOwner();
+       this.owner.decorateLinks();
+       await this.owner.owner.save?.();
       }
       try{
-       const leaf=await this.owner.app.openNoteLink(noteTitle,this.owner.owner.file.path);
+       const leaf=await this.owner.app.openNoteLink(noteTitle,this.owner.owner.file?.path||'');
        if(leaf?.view?.notePage){
         await leaf.view.notePage.setWikipedia(article);
        }else{
-        const targetFile=this.owner.app.metadataCache.getFirstLinkpathDest(noteTitle,this.owner.owner.file.path);
+        const targetFile=this.owner.app.metadataCache.getFirstLinkpathDest(noteTitle,this.owner.owner.file?.path||'');
         if(targetFile){
          await this.owner.app.vault.process(targetFile,text=>patchNotePage(text,d=>{d.wikipedia=article}));
         }
        }
       }catch(error){
-       this.owner.owner.status.textContent=error.message;
+       if(this.owner.owner?.status)this.owner.owner.status.textContent=error.message;
+       new Notice('Erro ao vincular nota: '+error.message);
       }
      }
     });
@@ -73,7 +77,7 @@ export class SelectionToolbar{
  update(){
   if(this.element.contains(document.activeElement)||document.activeElement?.closest('.atlas-common-palette'))return;
   const editor=this.editor,{from,to,empty}=editor.state.selection;
-  if(empty||!editor.isFocused||this.owner.owner.editorMode!=='formatted'||!this.owner.host.isConnected){this.element.hidden=true;return}
+  if(empty||!editor.isFocused||(this.owner.owner?.editorMode&&this.owner.owner.editorMode!=='formatted')||!this.owner.host.isConnected){this.element.hidden=true;return}
   this.element.hidden=false;this.bold.setAttribute('aria-pressed',String(editor.isActive('bold')));this.italic.setAttribute('aria-pressed',String(editor.isActive('italic')));this.strike.setAttribute('aria-pressed',String(editor.isActive('strike')));this.underline.setAttribute('aria-pressed',String(editor.isActive('underline')));
   for(const control of this.paintControls||[])control.button.setAttribute('aria-pressed',String(!!editor.getAttributes('textPaint')[control.attribute]));
   const start=editor.view.coordsAtPos(from),end=editor.view.coordsAtPos(to),rect=this.element.getBoundingClientRect(),width=Math.min(rect.width,innerWidth-16),height=rect.height;

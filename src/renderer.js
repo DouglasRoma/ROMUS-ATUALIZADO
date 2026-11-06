@@ -25,6 +25,7 @@ import {installFolderDrag} from './folder-drag.js';
 import {installFileActions} from './file-actions.js';
 import {SettingsModal} from './settings.js';
 import {NoteEditor} from './note-editor.js';
+import {NotePage} from './note-page.js';
 import {PropertiesModal} from './properties.js';
 import {NotesLibrary} from './notes-library.js';
 import {installBoardAppearance} from './appearance.js';
@@ -62,7 +63,7 @@ app.toggleSidebar=value=>{const open=typeof value==='boolean'?value:document.bod
 const sidebarToggle=document.querySelector('main').createEl('button',{cls:'atlas-sidebar-toggle',attr:{'aria-label':'Mostrar ou ocultar barra lateral',title:'Mostrar / ocultar barra lateral · Ctrl+\\'}});setIcon(sidebarToggle,'panel-left');sidebarToggle.onclick=()=>app.toggleSidebar();app.toggleSidebar(app.preferences.sidebarOpen);
 app.displayFileLabel=fileLabel;app.displayNoteFolder=file=>app.media?.byNote(file)?'Biblioteca de mídia':noteFolder(app,file);app.uiButton=button;app.renderFiles=renderFiles;app.flushAll=flush;installFileActions(app);app.renameNote=renameNote;app.createNote=newNote;app.editNoteFlashcards=()=>runCommand('edit-note-flashcards');installNoteCatalog(app);installRecentNotes(app);installFolderDrag(app);installBoardOrganization(app);installBoardDrag(app);
 app.metadataCache={getFirstLinkpathDest(link,source=''){
- const clean=decodeURIComponent(String(link)).replace(/^!?(?:\[\[)?/,'').replace(/\]\]$/,'').split('|')[0].split('#')[0];
+ let clean=decodeURIComponent(String(link||'')).replace(/^atlas-note:/i,'').replace(/^!?(?:\[\[)?/,'').replace(/\]\]$/,'').split('|')[0].split('#')[0].trim();
  const dir=source.split('/').slice(0,-1).join('/');
  for(let path of [clean,clean+'.md',normalizePath(dir+'/'+clean),normalizePath(dir+'/'+clean+'.md')]){const seen=new Set();while(!app.vault.getFileByPath(path)&&app.plugin?.noteRenames?.[path]&&!seen.has(path)){seen.add(path);path=app.plugin.noteRenames[path]}const file=app.vault.getFileByPath(path);if(file)return file}
  return app.vault.getFiles().find(f=>f.path.toLowerCase()===clean.toLowerCase()||f.basename.toLowerCase()===clean.toLowerCase()||f.name.toLowerCase()===clean.toLowerCase())||null;
@@ -82,46 +83,115 @@ function closeHover({preserve=false}={}){hoverToken++;const component=hoverCompo
 app.closeHoverPreview=closeHover;
 app.workspace.on('hover-link',async({event,targetEl,linktext,sourcePath})=>{
  if(!event.ctrlKey&&!event.metaKey)return;
- let file=app.metadataCache.getFirstLinkpathDest(linktext,sourcePath);
- const wiki=parseWikipediaUrl(linktext)||parseWikipediaUrl(targetEl?.getAttribute?.('href')||'');
+ let cleanLink=String(linktext||'');
+ if(cleanLink.startsWith('atlas-note:')){
+  try{cleanLink=decodeURIComponent(cleanLink.slice(11))}catch{cleanLink=cleanLink.slice(11)}
+ }
+ let file=app.metadataCache.getFirstLinkpathDest(cleanLink,sourcePath);
+ const targetHref=targetEl?.getAttribute?.('href')||'';
+ const wiki=parseWikipediaUrl(cleanLink)||parseWikipediaUrl(targetHref);
  if(!file&&wiki){
   file=app.metadataCache.getFirstLinkpathDest(wiki.title,sourcePath)||app.vault.getFileByPath((app.preferences?.notesFolder||'Notas')+'/'+wiki.title+'.md');
  }
  if(!file&&!wiki)return;
  app.retainPreviewAncestors(targetEl);
  if(file&&app.findNotePreview(targetEl,file))return;
- closeHover();const preview=hoverPreview=document.body.createDiv({cls:'ia-review-note-preview'});const width=Math.min(460,innerWidth-24);Object.assign(preview.style,{left:Math.max(12,Math.min(event.clientX+14,innerWidth-width-12))+'px',top:Math.max(12,Math.min(event.clientY+14,innerHeight-360))+'px',width:width+'px',maxHeight:'360px'});
+ closeHover();
+ const preview=hoverPreview=document.body.createDiv({cls:'ia-review-note-preview'});
+ const width=Math.min(520,innerWidth-24), height=Math.min(480,innerHeight-24);
+ Object.assign(preview.style,{left:Math.max(12,Math.min(event.clientX+14,innerWidth-width-12))+'px',top:Math.max(12,Math.min(event.clientY+14,innerHeight-height))+'px',width:width+'px',maxHeight:height+'px'});
  preview.createDiv({cls:'ia-review-note-preview-title',text:file?.basename||wiki?.title||'Wikipedia'});
- const body=preview.createDiv({cls:'ia-review-note-preview-body',text:'Carregando…'});
- if(file)app.wireEditableNotePreview(preview,file,options=>hoverPreview===preview?closeHover(options):undefined,targetEl);
- app.placeNotePreview(preview,targetEl);const component=hoverComponent=new Component();
- try{
-  if(file){
-   const raw=await app.vault.read(file);if(!preview.isConnected||preview.dataset.editing)return;
-   const doc=propertyDocument(raw),data=notePageData(doc.props);
-   let text=summaryText(doc.body);
-   if((!text.trim()||text.trim()==='# '+file.basename)&&data?.wikipedia){
-    text=(data.wikipedia.summary?'> '+data.wikipedia.summary+'\n\n':'')+wikiToMarkdown(data.wikipedia.content||'');
-   }else if(data?.wikipedia?.summary){
-    text='> **Wikipedia ('+(data.wikipedia.lang||'es').toUpperCase()+')**: '+data.wikipedia.summary+'\n\n'+text;
-   }
-   await MarkdownRenderer.render(app,text.slice(0,24000),body,file.path,component);
-  }else if(wiki){
-   const art=await fetchWikipediaArticle(wiki.title,wiki.lang,wiki.url);
-   if(!preview.isConnected)return;body.empty();
-   const md=(art.thumbnail?'![]('+art.thumbnail+')\n\n':'')+(art.summary?'> '+art.summary+'\n\n':'')+wikiToMarkdown(art.content||'');
-   await MarkdownRenderer.render(app,md.slice(0,24000),body,'',component);
+
+ let raw='', doc=null, data=null;
+ if(file){
+  try{raw=await app.vault.read(file);doc=propertyDocument(raw);data=notePageData(doc.props);}catch{}
+ }
+ const sections=[['summary','Resumo','file-text'],['wikipedia','Resumo Wikipedia','wikipedia']];
+ if(file)sections.push(['media','Mídia da nota','paperclip']);
+ if(data?.quizzes?.length)sections.push(['quizzes','Quizzes','list-checks']);
+
+ let activeSection='summary';
+ if(wiki||((!doc?.body?.trim()||doc?.body?.trim()==='# '+file?.basename)&&data?.wikipedia)){
+  activeSection='wikipedia';
+ }
+ preview.dataset.previewTab=activeSection;
+
+ const tabButtons={};
+ if(sections.length>1){
+  const nav=preview.createDiv({cls:'romus-board-note-tabs romus-preview-tabs',attr:{role:'tablist','aria-label':'Seções da nota'}});
+  for(const [key,label,icon]of sections){
+   const b=app.uiButton(nav,label,icon,()=>renderCurrentSection(key).catch(e=>new Notice(e.message)));
+   b.setAttribute('role','tab');
+   b.setAttribute('aria-selected',String(key===activeSection));
+   tabButtons[key]=b;
   }
- }catch(error){
-  if(preview.isConnected&&!preview.dataset.editing)body.textContent=error.message;
+ }
+
+ const body=preview.createDiv({cls:'ia-review-note-preview-body'});
+ if(file)app.wireEditableNotePreview(preview,file,options=>hoverPreview===preview?closeHover(options):undefined,targetEl);
+ app.placeNotePreview(preview,targetEl);
+ const component=hoverComponent=new Component();
+ component.load();
+
+ let page=null;
+ if(file){
+  const owner={
+   app,
+   file,
+   leaf:app.workspace.activeLeaf,
+   contentEl:body,
+   save:()=>Promise.resolve(),
+   showProperties:()=>{}
+  };
+    page=new NotePage(owner,null,null,{contentOnly:true,section:activeSection});
+  page.load(raw);
+ }
+
+ async function renderCurrentSection(section){
+  activeSection=section;
+  preview.dataset.previewTab=section;
+  for(const [key,btn]of Object.entries(tabButtons))btn.setAttribute('aria-selected',String(key===section));
+  if(page){
+   await page.show(section);
+   return;
+  }
+  if(section==='wikipedia'&&wiki){
+   body.empty();
+   body.textContent='Carregando Wikipedia…';
+   try{
+    const art=await fetchWikipediaArticle(wiki.title,wiki.lang,wiki.url);
+    if(!preview.isConnected)return;
+    body.empty();
+    const md=(art.thumbnail?'![]('+art.thumbnail+')\n\n':'')+(art.summary?'> '+art.summary+'\n\n':'')+wikiToMarkdown(art.content||'');
+    await MarkdownRenderer.render(app,md.slice(0,24000),body,'',component);
+   }catch(err){
+    if(preview.isConnected)body.textContent=err.message;
+   }
+  }else{
+   body.empty();
+   body.createDiv({cls:'ia-muted',text:'Vincule esta página à nota para acessar todas as mídias e resumos.'});
+  }
+ }
+
+ if(!page){
+  await renderCurrentSection(activeSection);
  }
 });
 let hoveredNoteLink;
 document.addEventListener('pointerover',event=>{
- const link=event.target.closest('a.internal-link, a[data-href], a[href*="wikipedia.org"]');
+ const link=event.target.closest('a.internal-link, a[data-href], a[href*="wikipedia.org"], a[href^="atlas-note:"]');
  const href=link?.getAttribute('href')||'';
  const wiki=parseWikipediaUrl(href);
- const linktext=link?.dataset?.href||wiki?.title||href;
+ let linktext=link?.dataset?.href;
+ if(!linktext){
+  if(href.startsWith('atlas-note:')){
+   try{linktext=decodeURIComponent(href.slice(11))}catch{linktext=href.slice(11)}
+  }else if(wiki){
+   linktext=wiki.title;
+  }else{
+   linktext=href;
+  }
+ }
  hoveredNoteLink=link?{link,x:event.clientX,y:event.clientY,linktext}:null;
  if(link&&!link.closest('.ia-fsrs-view')&&(event.ctrlKey||event.metaKey)){
   app.workspace.trigger('hover-link',{event,targetEl:link,linktext,sourcePath:link.closest('[data-preview-note-path]')?.dataset.previewNotePath||app.workspace.getActiveFile()?.path||''});
@@ -132,7 +202,16 @@ window.addEventListener('keydown',event=>{
  const {link,x,y,linktext}=hoveredNoteLink;
  app.workspace.trigger('hover-link',{event:new MouseEvent('mouseover',{ctrlKey:event.ctrlKey,metaKey:event.metaKey,clientX:x,clientY:y}),targetEl:link,linktext,sourcePath:link.closest('[data-preview-note-path]')?.dataset.previewNotePath||app.workspace.getActiveFile()?.path||''});
 });
-window.addEventListener('keyup',event=>{if(['Control','Meta'].includes(event.key))closeHover()});window.addEventListener('blur',closeHover);
+window.addEventListener('keyup',event=>{
+ if(['Control','Meta'].includes(event.key)){
+  if(hoverPreview?.dataset?.retained||hoverPreview?.hasAttribute?.('data-pinned'))return;
+  closeHover();
+ }
+});
+window.addEventListener('blur',event=>{
+ if(hoverPreview?.dataset?.retained||hoverPreview?.hasAttribute?.('data-pinned'))return;
+ closeHover();
+});
 function button(host,label,icon,action){const el=host.createEl('button',{attr:{type:'button',title:label}});const glyph=el.createSpan();setIcon(glyph,icon);el.createSpan({text:label});el.onclick=()=>Promise.resolve().then(action).catch(e=>{console.error(e);new Notice(e.message)});return el}
 function runCommand(id){const command=app.commands.find(c=>c.id===id);if(!command)return;if(command.checkCallback){if(command.checkCallback(true))command.checkCallback(false);else new Notice('Abra uma nota para usar esta ação.')}else return command.callback()}
 class Picker extends SuggestModal{constructor(title,items,choose){super(app);this.items=items;this.choose=choose;this.setPlaceholder(title)}getSuggestions(query){const q=query.toLocaleLowerCase();return this.items.filter(item=>(item.title+' '+(item.search||'')).toLocaleLowerCase().includes(q)).slice(0,100)}renderSuggestion(item,el){el.textContent=item.title;if(item.folder)el.createEl('small',{text:item.folder})}onChooseSuggestion(item){this.choose(item)}}

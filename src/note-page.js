@@ -8,6 +8,8 @@ import {stripImageEmbeds} from './image-deletion.js';
 import {openQuizImport} from './quiz-import.js';
 import {nextQuizOrder} from './quiz-order.js';
 import {openWikipediaModal,wikiToMarkdown,fetchWikipediaArticle} from './wikipedia.js';
+import {summaryText} from './note-content.js';
+import {FormattedEditor} from './formatted-editor.js';
 const covers={ocean:'linear-gradient(120deg,#153958,#3279a0,#86c5b8)',forest:'linear-gradient(115deg,#163c35,#487a63,#adc0a0)',dusk:'linear-gradient(120deg,#302b51,#70649a,#ca9ca3)',sand:'linear-gradient(120deg,#5e4532,#b49066,#d6c4a7)',ink:'linear-gradient(120deg,#171c26,#374557,#687d92)'};
 const fold=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase();
 const fileKind=path=>/\.(?:png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(path)?'image':/\.pdf$/i.test(path)?'pdf':'file';
@@ -31,19 +33,19 @@ export class NotePage{
   if(this.contentOnly){if(force||key!==this.key){this.key=key;this.renderHub()}return}
   if(!force&&key===this.key)return;this.key=key;this.properties.render(raw);this.renderCover();this.renderTabs();this.owner.outline?.scheduleGeometry();if(this.section!=='summary')this.renderHub();
  }
- async mutate(change){await this.owner.save();await this.app.vault.process(this.owner.file,text=>patchNotePage(text,change));this.owner.showProperties(await this.app.vault.read(this.owner.file),true)}
+ async mutate(change){if(this._mutating)return;this._mutating=true;try{await this.app.vault.process(this.owner.file,text=>patchNotePage(text,change));this.owner.showProperties(await this.app.vault.read(this.owner.file),true)}finally{this._mutating=false}}
  async saveEntry(kind,entry,before){await this.mutate(data=>{const rows=data[kind]||=[],i=rows.findIndex(row=>row.id===entry.id);if(before&&JSON.stringify(rows[i])!==JSON.stringify(before))throw Error('Este conteúdo mudou em outra janela. Seu texto foi mantido; reabra para conferir.');if(i>=0)rows[i]=entry;else rows.push(entry);data[kind]=rows})}
  async removeEntry(kind,entry){await this.mutate(data=>{data[kind]=(data[kind]||[]).filter(row=>row.id!==entry.id)})}
  renderTabs(){
   if(this.contentOnly)return;
   this.tabs.empty();
   this.tabButtons={};
-  const sections=[['summary','Resumo','file-text']];
-  if(this.data?.wikipedia){
-   sections.push(['wikipedia','Resumo Wikipedia','wikipedia']);
-  }
-  sections.push(['media','Mídia da nota','paperclip']);
-  sections.push(['quizzes','Quizzes','list-checks']);
+  const sections=[
+   ['summary','Resumo','file-text'],
+   ['wikipedia','Resumo Wikipedia','wikipedia'],
+   ['media','Mídia da nota','paperclip'],
+   ['quizzes','Quizzes','list-checks']
+  ];
   for(const [key,label,icon]of sections){
    const b=this.app.uiButton(this.tabs,label,icon,()=>this.show(key));
    b.setAttribute('role','tab');
@@ -52,8 +54,14 @@ export class NotePage{
   }
   this.updateCounts();
  }
- updateCounts(){if(this.contentOnly)return;const media=this.resources().length+(this.data?.cases||[]).length,quizzes=(this.data?.quizzes||[]).length;if(this.tabButtons.media){this.tabButtons.media.title=media+' itens de mídia e casos clínicos';this.tabButtons.media.querySelector('span:last-child').textContent='Mídia da nota'+(media?' · '+media:'');}if(this.tabButtons.quizzes){this.tabButtons.quizzes.title=quizzes+' quizzes';this.tabButtons.quizzes.querySelector('span:last-child').textContent='Quizzes'+(quizzes?' · '+quizzes:'');}}
+ updateCounts(){if(this.contentOnly)return;const media=this.resources().length+(this.data?.cases||[]).length,quizzes=(this.data?.quizzes||[]).length;if(this.tabButtons.media){this.tabButtons.media.title=media+' itens de mídia e casos clínicos';this.tabButtons.media.querySelector('span:last-child').textContent='Mídia da nota'+(media?' · '+media:'');}if(this.tabButtons.quizzes){this.tabButtons.quizzes.title=quizzes+' quizzes';this.tabButtons.quizzes.querySelector('span:last-child').textContent='Quizzes'+(quizzes?' · '+quizzes:'');}if(this.tabButtons.wikipedia){this.tabButtons.wikipedia.title=this.data?.wikipedia?'Resumo Wikipedia · '+this.data.wikipedia.title:'Vincular página da Wikipedia';}}
  async show(section){
+  if(this.wikiEditor&&section!=='wikipedia'){
+   clearTimeout(this._wikiSaveTimer);
+   this.wikiEditor.flushToOwner?.();
+   this.wikiEditor.destroy();
+   this.wikiEditor=null;
+  }
   if(this.contentOnly){this.section=section;this.renderHub();return}
   await this.owner.save();if(this.section==='summary')this.position=captureReadingPosition(this.owner);this.section=section;this.owner.contentEl.dataset.noteSection=section;this.owner.writingArea.hidden=section!=='summary';this.hub.hidden=section==='summary';for(const [key,b]of Object.entries(this.tabButtons))b.setAttribute('aria-selected',String(key===section));
   if(section==='summary'){this.preview?.unload();this.preview=null;restoreReadingPosition(this.owner,this.position);this.owner.outline?.refresh();this.owner.outline?.scheduleGeometry()}else this.renderHub();
@@ -84,7 +92,15 @@ export class NotePage{
   const modal=new Modal(this.app);modal.setTitle('Adicionar mídia à nota');modal.modalEl.addClass('romus-resource-dialog');const form=modal.contentEl;form.createEl('label',{text:'Endereço do YouTube, página, Spotify ou PDF'});const url=form.createEl('input',{attr:{type:'url',placeholder:'https://…','aria-label':'Link da mídia da nota'}});form.createEl('label',{text:'Título'});const name=form.createEl('input',{attr:{placeholder:'Como você quer chamar este conteúdo?','aria-label':'Título da mídia da nota'}});const status=form.createDiv({cls:'romus-form-error',attr:{role:'status'}}),save=this.app.uiButton(form,'Adicionar mídia','plus',async()=>{const parsed=mediaSource(url.value.trim());if(!parsed){status.textContent='Cole um endereço http:// ou https:// válido.';return}save.disabled=true;try{const item=this.app.noteMedia.register(parsed.source,this.owner.file.path);if(name.value.trim()){item.title=name.value.trim();item.customTitle=true;this.app.media.touch()}await this.mutate(d=>{d.resources||=[];if(!d.resources.some(r=>r.id===item.id))d.resources.push(this.entry(item))});await this.app.media.flush();modal.close();if(!name.value.trim()&&['youtube','spotify'].includes(item.type))window.atlasNative.call('media:metadata',item.source).then(meta=>{if(meta&&!item.customTitle&&this.app.media.items.get(item.id)===item){item.title=meta.title||item.title;item.thumbnail=meta.thumbnail||item.thumbnail;this.app.media.touch()}}).catch(()=>{})}catch(e){status.textContent=e.message}finally{save.disabled=false}});save.classList.add('mod-cta');modal.open();url.focus();
  }
  renderHub(){
-  if(!this.alive||this.suspendHubRefresh)return;this.preview?.unload();this.preview=new Component();this.preview.load();this.hub.empty();this.updateCounts();
+  if(!this.alive||this.suspendHubRefresh)return;
+  if(this.wikiEditor&&this.section!=='wikipedia'){
+   clearTimeout(this._wikiSaveTimer);
+   this.wikiEditor.flushToOwner?.();
+   this.wikiEditor.destroy();
+   this.wikiEditor=null;
+  }
+  this.preview?.unload();this.preview=new Component();this.preview.load();this.hub.empty();this.updateCounts();
+  if(this.section==='summary'){this.renderSummary();return;}
   if(this.section==='wikipedia'){this.renderWikipedia();return;}
   const top=this.hub.createDiv({cls:'romus-hub-heading'});const title=top.createDiv();title.createEl('h2',{text:this.section==='quizzes'?'Quizzes da nota':'Mídia da nota'});title.createEl('p',{text:this.section==='quizzes'?'Pratique questões de múltipla escolha neste contexto.':'Vídeos, documentos, arquivos e casos clínicos reunidos nesta nota.'});
   const add=this.app.uiButton(top,this.section==='quizzes'?'Novo quiz':'Adicionar mídia','plus',()=>this.section==='quizzes'?this.quizDialog():this.addMenu(add));add.classList.add('mod-cta');
@@ -111,6 +127,16 @@ export class NotePage{
   const modal=new Modal(this.app);modal.setTitle(before?'Editar quiz':'Novo quiz de múltipla escolha');modal.modalEl.addClass('romus-quiz-editor');const title=modal.contentEl.createEl('input',{value:before?.title||'',attr:{placeholder:'Título do quiz','aria-label':'Título do quiz'}});modal.contentEl.createEl('label',{text:'Pergunta · Markdown'});const question=modal.contentEl.createEl('textarea',{value:before?.question||'',attr:{rows:'3','aria-label':'Pergunta do quiz'}});modal.contentEl.createEl('p',{cls:'ia-muted',text:'Escreva as alternativas e marque uma resposta correta.'});const choices=modal.contentEl.createDiv({cls:'romus-quiz-options-editor'}),fields=[],group=crypto.randomUUID();const add=value=>{const i=fields.length,row=choices.createDiv(),radio=row.createEl('input',{attr:{type:'radio',name:group,'aria-label':'Alternativa correta '+String.fromCharCode(65+i)}});radio.checked=before?.correct===i;const letter=row.createSpan({text:String.fromCharCode(65+i)}),input=row.createEl('input',{value:value||'',attr:{'aria-label':'Alternativa '+String.fromCharCode(65+i),placeholder:'Texto da alternativa'}});fields.push({input,radio,row})};for(const value of before?.choices||['','','',''])add(value);
   const controls=modal.contentEl.createDiv({cls:'romus-quiz-choice-tools'});const extra=this.app.uiButton(controls,'Adicionar alternativa','plus',()=>{if(fields.length<8)add('')});this.app.uiButton(controls,'Remover última alternativa','minus',()=>{if(fields.length>2)fields.pop().row.remove()});modal.contentEl.createEl('label',{text:'Explicação · opcional'});const explanation=modal.contentEl.createEl('textarea',{value:before?.explanation||'',attr:{rows:'3','aria-label':'Explicação do quiz'}}),status=modal.contentEl.createDiv({cls:'romus-form-error',attr:{role:'status'}});const save=this.app.uiButton(modal.contentEl,'Salvar quiz','check',async()=>{save.disabled=true;try{const entry=validateQuiz({id:before?.id||crypto.randomUUID(),title:title.value.trim(),question:question.value.trim(),choices:fields.map(f=>f.input.value.trim()),correct:fields.findIndex(f=>f.radio.checked),explanation:explanation.value});await this.saveEntry('quizzes',entry,before);this.answers.delete(entry.id);if(this.section==='quizzes')this.renderHub();modal.close()}catch(e){status.textContent=e.message}finally{save.disabled=false}});save.classList.add('mod-cta');modal.open();title.focus();
  }
+ renderSummary(){
+  const container=this.hub.createDiv({cls:'romus-summary-view markdown-preview'});
+  const doc=propertyDocument(this.raw||'');
+  const bodyText=summaryText(doc.body||'');
+  if(!bodyText.trim()){
+   this.empty(this.hub,'Nota sem resumo.','Esta nota ainda não possui resumo escrito.');
+   return;
+  }
+  MarkdownRenderer.render(this.app,bodyText,container,this.owner.file?.path||'',this.preview);
+ }
  renderQuizzes(){
   const quizzes=this.data.quizzes||[];if(!quizzes.length){this.empty(this.hub,'Teste seu raciocínio.','Crie um quiz com alternativas e uma explicação para revisar este tema.');return}
   const limit=this.quizLimit||10,list=this.hub.createDiv({cls:'romus-quiz-list'});for(const quiz of quizzes.slice(0,limit)){const card=list.createEl('article',{cls:'romus-quiz-card'}),head=card.createDiv({cls:'romus-quiz-heading'});head.createEl('h3',{text:quiz.title});this.app.uiButton(head,'Editar quiz','square-pen',()=>this.quizDialog(quiz));this.app.uiButton(head,'Remover quiz','trash-2',()=>this.confirmRemove('quizzes',quiz));const question=card.createDiv({cls:'markdown-preview'});MarkdownRenderer.render(this.app,quiz.question,question,this.owner.file.path,this.preview);let state=this.answers.get(quiz.id);if(!state){const history=this.app.quizOrders||=new Map(),key=this.owner.file.path+':'+quiz.id,order=nextQuizOrder(quiz.choices.length,history.get(key));state={selected:-1,checked:false,order};history.delete(key);history.set(key,order);while(history.size>500)history.delete(history.keys().next().value);this.answers.set(quiz.id,state)}const choices=card.createDiv({cls:'romus-quiz-choices'});for(const [position,i]of state.order.entries()){const value=quiz.choices[i],b=choices.createEl('button',{attr:{'aria-pressed':String(state.selected===i),'aria-label':'Escolher alternativa '+String.fromCharCode(65+position)}});b.classList.toggle('is-correct',state.checked&&i===quiz.correct);b.classList.toggle('is-wrong',state.checked&&state.selected===i&&i!==quiz.correct);b.createSpan({cls:'romus-quiz-letter',text:String.fromCharCode(65+position)});const choiceText=b.createDiv({cls:'romus-quiz-choice-text'});MarkdownRenderer.render(this.app,value,choiceText,this.owner.file.path,this.preview);b.onclick=event=>{if(event.target.closest('a,img'))return;if(!state.checked){state.selected=i;this.renderHub()}}}
@@ -126,6 +152,11 @@ export class NotePage{
    btn.classList.add('mod-cta');
    return;
   }
+  if(this.wikiEditor){
+   clearTimeout(this._wikiSaveTimer);
+   this.wikiEditor.destroy();
+   this.wikiEditor=null;
+  }
   const container=this.hub.createDiv({cls:'romus-wiki-view'});
   const header=container.createDiv({cls:'romus-wiki-header'});
   const headLeft=header.createDiv({cls:'romus-wiki-head-main'});
@@ -135,10 +166,11 @@ export class NotePage{
   headLeft.createEl('h2',{cls:'romus-wiki-title',text:wiki.title});
   if(wiki.description)headLeft.createEl('p',{cls:'romus-wiki-desc',text:wiki.description});
   const actions=header.createDiv({cls:'romus-wiki-actions'});
+  const statusBadge=actions.createSpan({cls:'romus-wiki-status-badge ia-muted',text:''});
   if(wiki.url){
    this.app.uiButton(actions,'Abrir no navegador','external-link',()=>window.atlasNative?.call('external',wiki.url));
   }
-  this.app.uiButton(actions,'Atualizar','rotate-ccw',()=>this.refreshWikipedia());
+  this.app.uiButton(actions,'Restaurar da Wikipedia','rotate-ccw',()=>this.refreshWikipedia());
   this.app.uiButton(actions,'Trocar página','search',()=>this.wikipediaDialog());
   this.app.uiButton(actions,'Desvincular','trash-2',()=>this.unlinkWikipedia());
   if(wiki.thumbnail){
@@ -149,15 +181,42 @@ export class NotePage{
     summaryBox.createEl('strong',{text:'Resumo Introdutório'});
     summaryBox.createEl('p',{text:wiki.summary});
    }
-  }else if(wiki.summary&&wiki.content&&wiki.content!==wiki.summary){
-   const leadBox=container.createDiv({cls:'romus-wiki-lead romus-wiki-lead-full'});
-   leadBox.createEl('strong',{text:'Resumo Introdutório'});
-   leadBox.createEl('p',{text:wiki.summary});
   }
-  const body=container.createDiv({cls:'romus-wiki-body markdown-preview'});
+  const body=container.createDiv({cls:'romus-wiki-body romus-wiki-editor-host atlas-rich-editor'});
   const rawText=wiki.content||wiki.summary||'';
   const markdown=wikiToMarkdown(rawText);
-  MarkdownRenderer.render(this.app,markdown,body,this.owner.file.path,this.preview);
+  const owner={
+   app:this.app,
+   file:this.owner.file,
+   editorMode:'formatted',
+   plainDocument:true,
+   status:statusBadge,
+   input:{value:markdown},
+   save:async()=>{
+    if(!this.wikiEditor)return;
+    const newMarkdown=this.wikiEditor.serialize();
+    if(this.data?.wikipedia&&this.data.wikipedia.content!==newMarkdown){
+     await this.mutate(d=>{if(d.wikipedia)d.wikipedia.content=newMarkdown});
+     statusBadge.textContent='Salvo';
+     setTimeout(()=>{if(statusBadge.textContent==='Salvo')statusBadge.textContent=''},2000);
+    }
+   },
+   queueSave:()=>{
+    statusBadge.textContent='Salvando…';
+    clearTimeout(this._wikiSaveTimer);
+    this._wikiSaveTimer=setTimeout(async()=>{
+     try{
+      await owner.save();
+     }catch(err){
+      statusBadge.textContent='Erro ao salvar: '+err.message;
+     }
+    },400);
+   }
+  };
+  const wikiEditor=new FormattedEditor(owner,body);
+  wikiEditor.load(markdown);
+  this.wikiEditor=wikiEditor;
+  this.saveWiki=async()=>owner.save();
  }
  async setWikipedia(article){
   await this.mutate(d=>{d.wikipedia=article});
@@ -188,5 +247,16 @@ export class NotePage{
    onLink:async(article)=>{await this.setWikipedia(article)}
   });
  }
-  dispose(){this.alive=false;this.off?.();this.preview?.unload();this.owner.contentEl.removeEventListener('pointerdown',this.outsideTools,true)}
+  dispose(){
+   this.alive=false;
+   clearTimeout(this._wikiSaveTimer);
+   if(this.wikiEditor){
+    this.wikiEditor.flushToOwner?.();
+    this.wikiEditor.destroy();
+    this.wikiEditor=null;
+   }
+   this.off?.();
+   this.preview?.unload();
+   this.owner.contentEl.removeEventListener('pointerdown',this.outsideTools,true);
+  }
 }
