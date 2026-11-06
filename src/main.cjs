@@ -10,17 +10,15 @@ app.setName('ROMUS');
 const configPath=()=>path.join(app.getPath('userData'),'application.json');
 const saveConfig=()=>fs.writeFile(configPath(),JSON.stringify(config,null,2));
 async function launch(){
- players=await startPlayerServer();app.once('will-quit',()=>players.close());
+ players=await startPlayerServer();
+ app.once('will-quit',()=>players.close());
  try{config=JSON.parse(await fs.readFile(configPath(),'utf8'))}catch(e){if(e.code!=='ENOENT')throw e}
- library=new Library(config.library||path.join(app.getPath('userData'),'libraries/default'));await library.list();
- protocol.handle('atlas-data',async request=>{try{const url=new URL(request.url);if(url.hostname!=='library')return new Response('',{status:403});const file=await library.resolve(decodeURIComponent(url.pathname.slice(1)));return net.fetch(pathToFileURL(file).href)}catch{return new Response('',{status:404})}});
+ library=new Library(config.library||path.join(app.getPath('userData'),'libraries/default'));await library.list(); protocol.handle('atlas-data',async request=>{try{const url=new URL(request.url);if(url.hostname!=='library')return new Response('',{status:403});const file=await library.resolve(decodeURIComponent(url.pathname.slice(1)));return net.fetch(pathToFileURL(file).href)}catch{return new Response('',{status:404})}});
  win=new BrowserWindow({width:1450,height:940,minWidth:800,minHeight:600,backgroundColor:'#0d0d0d',title:'ROMUS',titleBarStyle:'hidden',titleBarOverlay:{color:'#0d0d0d',symbolColor:'#a1a9b5',height:47},icon:path.join(__dirname,'../resources/icon.ico'),show:true,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,webviewTag:true}});
  // Keep interface rasterization at native scale; embedded readers own their zoom.
  win.webContents.setZoomMode('isolated');
  win.webContents.on('did-finish-load',()=>win.webContents.setZoomFactor(1));
  win.removeMenu();
- win.webContents.on('console-message',(e,level,msg)=>console.log('[RENDERER]',msg));
- win.webContents.on('did-fail-load',(e,code,desc)=>console.error('[FAIL LOAD]',code,desc));
  if(!process.env.IMAGE_ATLAS_TEST_HOME){win.show();win.focus();}
  win.webContents.setWindowOpenHandler(({url})=>{if(/^https?:\/\//.test(url))shell.openExternal(url);return{action:'deny'}});
  win.webContents.on('will-navigate',(event,url)=>{if(url!==win.webContents.getURL()){event.preventDefault();if(/^https?:\/\//.test(url))shell.openExternal(url)}});
@@ -135,6 +133,5 @@ async function launch(){
   }
   throw Error('Operação não suportada.');
  });
- await win.loadFile(path.join(__dirname,'../dist/index.html'));
-}
+ await win.loadFile(path.join(__dirname,'../dist/index.html')); }
 if(!app.requestSingleInstanceLock())app.quit();else{app.on('second-instance',()=>{if(win){if(win.isMinimized())win.restore();win.show();win.focus()}});app.whenReady().then(launch).catch(error=>{dialog.showErrorBox('ROMUS',error.message);app.quit()});app.on('window-all-closed',()=>app.quit())}

@@ -24,7 +24,12 @@ const fold=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCas
 // recreate anchor elements without a content update or decoration frame.
 const NoteLink=Link.extend({renderHTML(props){
  const spec=this.parent(props),attrs=spec[1];
- if(attrs?.href?.startsWith('atlas-note:')){attrs.class=[attrs.class,'internal-link'].filter(Boolean).join(' ');try{attrs['data-href']=decodeURIComponent(attrs.href.slice(11))}catch{attrs['data-href']=attrs.href.slice(11)}}
+ const wiki=parseWikipediaUrl(attrs?.href||'');
+ if(attrs?.href?.startsWith('atlas-note:')||wiki){
+  attrs.class=[attrs.class,'internal-link'].filter(Boolean).join(' ');
+  try{attrs['data-href']=wiki?wiki.title:decodeURIComponent(attrs.href.slice(11))}
+  catch{attrs['data-href']=wiki?wiki.title:attrs.href.slice(11)}
+ }
  return spec;
 }});
 export class FormattedEditor{

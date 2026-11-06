@@ -6,6 +6,9 @@ import {installBoardDrag} from './board-drag.js';
 import {installRecentNotes} from './recent-notes.js';
 import {fileLabel,noteFolder} from './file-presentation.js';
 import {summaryText} from './note-content.js';
+import {propertyDocument} from './property-data.js';
+import {notePageData} from './note-page-data.js';
+import {parseWikipediaUrl,wikiToMarkdown,fetchWikipediaArticle} from './wikipedia.js';
 import {installImages} from './image-viewer.js';
 import {installWorkspacePanes} from './workspace-panes.js';
 import {installFlashcardSearch} from './flashcard-search.js';
@@ -78,14 +81,57 @@ let hoverPreview,hoverComponent,hoverToken=0;
 function closeHover({preserve=false}={}){hoverToken++;const component=hoverComponent;if(!preserve)hoverPreview?.remove();hoverPreview=null;hoverComponent=null;if(preserve)return()=>component?.unload();component?.unload()}
 app.closeHoverPreview=closeHover;
 app.workspace.on('hover-link',async({event,targetEl,linktext,sourcePath})=>{
- if(!event.ctrlKey&&!event.metaKey)return;const file=app.metadataCache.getFirstLinkpathDest(linktext,sourcePath);if(file?.extension!=='md')return;
- app.retainPreviewAncestors(targetEl);if(app.findNotePreview(targetEl,file))return;
- closeHover();const preview=hoverPreview=document.body.createDiv({cls:'ia-review-note-preview'});const width=Math.min(440,innerWidth-24);Object.assign(preview.style,{left:Math.max(12,Math.min(event.clientX+14,innerWidth-width-12))+'px',top:Math.max(12,Math.min(event.clientY+14,innerHeight-360))+'px',width:width+'px',maxHeight:'340px'});preview.createDiv({cls:'ia-review-note-preview-title',text:file.basename});const body=preview.createDiv({cls:'ia-review-note-preview-body',text:'Carregando…'});app.wireEditableNotePreview(preview,file,options=>hoverPreview===preview?closeHover(options):undefined,targetEl);app.placeNotePreview(preview,targetEl);const component=hoverComponent=new Component();
- try{const raw=await app.vault.read(file);if(!preview.isConnected||preview.dataset.editing)return;const text=summaryText(raw.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/,''));await MarkdownRenderer.render(app,text.slice(0,24000),body,file.path,component)}catch(error){if(preview.isConnected&&!preview.dataset.editing)body.textContent=error.message}
+ if(!event.ctrlKey&&!event.metaKey)return;
+ let file=app.metadataCache.getFirstLinkpathDest(linktext,sourcePath);
+ const wiki=parseWikipediaUrl(linktext)||parseWikipediaUrl(targetEl?.getAttribute?.('href')||'');
+ if(!file&&wiki){
+  file=app.metadataCache.getFirstLinkpathDest(wiki.title,sourcePath)||app.vault.getFileByPath((app.preferences?.notesFolder||'Notas')+'/'+wiki.title+'.md');
+ }
+ if(!file&&!wiki)return;
+ app.retainPreviewAncestors(targetEl);
+ if(file&&app.findNotePreview(targetEl,file))return;
+ closeHover();const preview=hoverPreview=document.body.createDiv({cls:'ia-review-note-preview'});const width=Math.min(460,innerWidth-24);Object.assign(preview.style,{left:Math.max(12,Math.min(event.clientX+14,innerWidth-width-12))+'px',top:Math.max(12,Math.min(event.clientY+14,innerHeight-360))+'px',width:width+'px',maxHeight:'360px'});
+ preview.createDiv({cls:'ia-review-note-preview-title',text:file?.basename||wiki?.title||'Wikipedia'});
+ const body=preview.createDiv({cls:'ia-review-note-preview-body',text:'Carregando…'});
+ if(file)app.wireEditableNotePreview(preview,file,options=>hoverPreview===preview?closeHover(options):undefined,targetEl);
+ app.placeNotePreview(preview,targetEl);const component=hoverComponent=new Component();
+ try{
+  if(file){
+   const raw=await app.vault.read(file);if(!preview.isConnected||preview.dataset.editing)return;
+   const doc=propertyDocument(raw),data=notePageData(doc.props);
+   let text=summaryText(doc.body);
+   if((!text.trim()||text.trim()==='# '+file.basename)&&data?.wikipedia){
+    text=(data.wikipedia.summary?'> '+data.wikipedia.summary+'\n\n':'')+wikiToMarkdown(data.wikipedia.content||'');
+   }else if(data?.wikipedia?.summary){
+    text='> **Wikipedia ('+(data.wikipedia.lang||'es').toUpperCase()+')**: '+data.wikipedia.summary+'\n\n'+text;
+   }
+   await MarkdownRenderer.render(app,text.slice(0,24000),body,file.path,component);
+  }else if(wiki){
+   const art=await fetchWikipediaArticle(wiki.title,wiki.lang,wiki.url);
+   if(!preview.isConnected)return;body.empty();
+   const md=(art.thumbnail?'![]('+art.thumbnail+')\n\n':'')+(art.summary?'> '+art.summary+'\n\n':'')+wikiToMarkdown(art.content||'');
+   await MarkdownRenderer.render(app,md.slice(0,24000),body,'',component);
+  }
+ }catch(error){
+  if(preview.isConnected&&!preview.dataset.editing)body.textContent=error.message;
+ }
 });
 let hoveredNoteLink;
-document.addEventListener('pointerover',event=>{const link=event.target.closest('a.internal-link');hoveredNoteLink=link?{link,x:event.clientX,y:event.clientY}:null;if(link&&!link.closest('.ia-fsrs-view'))app.workspace.trigger('hover-link',{event,targetEl:link,linktext:link.dataset.href,sourcePath:link.closest('[data-preview-note-path]')?.dataset.previewNotePath||app.workspace.getActiveFile()?.path||''})});
-window.addEventListener('keydown',event=>{if(!['Control','Meta'].includes(event.key)||event.repeat||!hoveredNoteLink?.link.isConnected||hoveredNoteLink.link.closest('.ia-fsrs-view'))return;const {link,x,y}=hoveredNoteLink;app.workspace.trigger('hover-link',{event:new MouseEvent('mouseover',{ctrlKey:event.ctrlKey,metaKey:event.metaKey,clientX:x,clientY:y}),targetEl:link,linktext:link.dataset.href,sourcePath:link.closest('[data-preview-note-path]')?.dataset.previewNotePath||app.workspace.getActiveFile()?.path||''})});
+document.addEventListener('pointerover',event=>{
+ const link=event.target.closest('a.internal-link, a[data-href], a[href*="wikipedia.org"]');
+ const href=link?.getAttribute('href')||'';
+ const wiki=parseWikipediaUrl(href);
+ const linktext=link?.dataset?.href||wiki?.title||href;
+ hoveredNoteLink=link?{link,x:event.clientX,y:event.clientY,linktext}:null;
+ if(link&&!link.closest('.ia-fsrs-view')&&(event.ctrlKey||event.metaKey)){
+  app.workspace.trigger('hover-link',{event,targetEl:link,linktext,sourcePath:link.closest('[data-preview-note-path]')?.dataset.previewNotePath||app.workspace.getActiveFile()?.path||''});
+ }
+});
+window.addEventListener('keydown',event=>{
+ if(!['Control','Meta'].includes(event.key)||event.repeat||!hoveredNoteLink?.link.isConnected||hoveredNoteLink.link.closest('.ia-fsrs-view'))return;
+ const {link,x,y,linktext}=hoveredNoteLink;
+ app.workspace.trigger('hover-link',{event:new MouseEvent('mouseover',{ctrlKey:event.ctrlKey,metaKey:event.metaKey,clientX:x,clientY:y}),targetEl:link,linktext,sourcePath:link.closest('[data-preview-note-path]')?.dataset.previewNotePath||app.workspace.getActiveFile()?.path||''});
+});
 window.addEventListener('keyup',event=>{if(['Control','Meta'].includes(event.key))closeHover()});window.addEventListener('blur',closeHover);
 function button(host,label,icon,action){const el=host.createEl('button',{attr:{type:'button',title:label}});const glyph=el.createSpan();setIcon(glyph,icon);el.createSpan({text:label});el.onclick=()=>Promise.resolve().then(action).catch(e=>{console.error(e);new Notice(e.message)});return el}
 function runCommand(id){const command=app.commands.find(c=>c.id===id);if(!command)return;if(command.checkCallback){if(command.checkCallback(true))command.checkCallback(false);else new Notice('Abra uma nota para usar esta ação.')}else return command.callback()}
