@@ -190,3 +190,41 @@
 .romus-board-case-body.markdown-preview h1{font-size:20px}.romus-board-case-body.markdown-preview h2{font-size:17px}
 .romus-board-panel-reader{height:390px;min-height:200px;display:flex;flex-direction:column;margin-top:12px}
 .romus-case-reader.is-fullscreen{position:fixed;inset:12px;width:auto;max-width:none;max-height:none;height:auto}
+
+/* Resumo Wikipedia: visualização completa e vinculação do artigo */
+.romus-wiki-view{display:flex;flex-direction:column;gap:18px;width:100%;max-width:920px;margin:0 auto}
+.romus-wiki-header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding-bottom:14px;border-bottom:1px solid var(--background-modifier-border);flex-wrap:wrap}
+.romus-wiki-head-main{display:flex;flex-direction:column;gap:5px;flex:1;min-width:240px}
+.romus-wiki-kicker{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:600;letter-spacing:.1em;color:var(--text-accent);text-transform:uppercase}
+.romus-wiki-kicker-icon{display:inline-flex;align-items:center}
+.romus-wiki-kicker-icon svg{width:13px;height:13px}
+.romus-wiki-title{font-size:26px;letter-spacing:-.6px;font-weight:600;margin:0;line-height:1.2}
+.romus-wiki-desc{font-size:13px;color:var(--text-muted);margin:0;line-height:1.4}
+.romus-wiki-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.romus-wiki-actions button{font-size:11px;padding:6px 9px;border-radius:7px}
+.romus-wiki-hero{display:flex;gap:18px;align-items:flex-start;padding:16px;background:var(--background-secondary);border:1px solid var(--background-modifier-border);border-radius:12px}
+.romus-wiki-thumb{width:160px;max-height:190px;object-fit:cover;border-radius:8px;flex:none;border:1px solid var(--background-modifier-border)}
+.romus-wiki-lead{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;font-size:13px;line-height:1.6;color:var(--text-normal)}
+.romus-wiki-lead strong{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--text-accent)}
+.romus-wiki-lead p{margin:0}
+.romus-wiki-lead-full{padding:14px 16px;background:var(--background-secondary);border-left:3px solid var(--text-accent);border-radius:0 8px 8px 0}
+.romus-wiki-body{font-size:14px;line-height:1.7;color:var(--text-normal);padding:4px 0 30px}
+.romus-wiki-body h2{font-size:20px;letter-spacing:-.4px;font-weight:600;margin:28px 0 10px;padding-bottom:5px;border-bottom:1px solid var(--background-modifier-border)}
+.romus-wiki-body h3{font-size:16px;font-weight:600;margin:20px 0 8px}
+.romus-wiki-body h4{font-size:14px;font-weight:600;margin:16px 0 6px}
+.romus-wiki-body p{margin:0 0 12px}
+
+/* Modal de busca e vínculo Wikipedia */
+.romus-wiki-modal{width:min(660px,94vw)}
+.romus-wiki-modal-search{display:flex;gap:8px;align-items:center;margin:8px 0 14px}
+.romus-wiki-modal-search input{flex:1;min-width:0;min-height:36px;padding:7px 11px;font-size:13px;background:var(--background-primary-alt);border-radius:8px;border:1px solid var(--background-modifier-border)}
+.romus-wiki-modal-search input:focus{border-color:var(--text-accent);outline:none}
+.romus-wiki-lang-select{display:flex;gap:3px;flex:none;background:var(--background-primary-alt);border:1px solid var(--background-modifier-border);border-radius:8px;padding:2px}
+.romus-wiki-lang-btn{background:transparent;border:0;font-size:11px;font-weight:600;padding:5px 8px;border-radius:6px;color:var(--text-muted);cursor:pointer}
+.romus-wiki-lang-btn[aria-pressed=true]{background:var(--text-accent);color:#fff}
+.romus-wiki-results{display:flex;flex-direction:column;gap:8px;max-height:380px;overflow-y:auto;padding-right:4px}
+.romus-wiki-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border:1px solid var(--background-modifier-border);border-radius:10px;background:var(--background-secondary)}
+.romus-wiki-item-info{flex:1;min-width:0}
+.romus-wiki-item-info h4{font-size:14px;font-weight:600;margin:0 0 3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.romus-wiki-item-info p{font-size:12px;color:var(--text-muted);margin:0;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.romus-wiki-link-btn{flex:none;font-size:11px;font-weight:550;padding:6px 12px;border-radius:7px;background:var(--interactive-accent);color:var(--text-on-accent)}

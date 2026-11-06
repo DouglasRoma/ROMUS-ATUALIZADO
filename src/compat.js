@@ -16,7 +16,16 @@ export function installDOM(){
  p.createEl=function(tag,options={}){if(typeof options==='string')options={cls:options};if(tag==='input'&&(options.type==='color'||options.attr?.type==='color'))return createColorControl(this,options);const el=document.createElement(tag);if(options.cls)el.className=Array.isArray(options.cls)?options.cls.join(' '):options.cls;if(options.text!==undefined)el.textContent=options.text;for(const key of ['type','value','placeholder','title'])if(options[key]!==undefined)el[key]=options[key];for(const [key,value]of Object.entries(options.attr||{}))el.setAttribute(key,String(value));this.append(el);return el};
  p.createDiv=function(options){return this.createEl('div',options)};p.createSpan=function(options){return this.createEl('span',options)};p.setText=function(text){this.textContent=text};
 }
-export function setIcon(el,name){const key=name.split('-').map(s=>s[0]?.toUpperCase()+s.slice(1)).join('');const data=icons[key];if(data)el.replaceChildren(createElement(data,{width:16,height:16,'aria-hidden':'true'}));else el.textContent='◇'}
+export function setIcon(el,name){
+ if(name==='wikipedia'){
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('width','16');svg.setAttribute('height','16');svg.setAttribute('fill','currentColor');svg.setAttribute('aria-hidden','true');
+  const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+  path.setAttribute('d','M14.7 3.5h5.8v.5c-.8.1-1.2.4-1.6 1.4L13.8 18h-.9l-3.3-8.6-2.9 8.6h-.9L1.3 5.4c-.4-1-.8-1.3-1.6-1.4v-.5h4.6v.5c-.8.1-1.1.4-1.1 1.1 0 .4.2 1 .5 1.9l2.4 6.7 2.4-7.1c.3-.8.4-1.3.4-1.6 0-.7-.4-1-1.2-1v-.5h4.2v.5c-.7.1-1 .4-1 1 0 .3.1.8.4 1.7l2.4 6.8 2.2-6.5c.3-1 .5-1.7.5-2 0-.6-.3-.9-1.1-1v-.5z');
+  svg.appendChild(path);el.replaceChildren(svg);return;
+ }
+ const key=name.split('-').map(s=>s[0]?.toUpperCase()+s.slice(1)).join('');const data=icons[key];if(data)el.replaceChildren(createElement(data,{width:16,height:16,'aria-hidden':'true'}));else el.textContent='◇';
+}
 export class Notice{constructor(message){const item=document.getElementById('notices').createDiv({cls:'notice',text:String(message)});setTimeout(()=>item.remove(),6500)}}
 export class Component{
  constructor(){this.disposers=[];this.children=new Set()}
@@ -29,6 +38,7 @@ export class Component{
 }
 const modalStack=[];
 class Scope{constructor(){this.bindings=[]}register(modifiers,key,callback){this.bindings.push({modifiers,key,callback});return callback}}
+if(typeof document!=='undefined'){
 document.addEventListener('keydown',event=>{
  if(event.defaultPrevented)return;
  const modal=modalStack.at(-1);if(!modal)return;
@@ -36,6 +46,7 @@ document.addEventListener('keydown',event=>{
  if(binding&&binding.callback(event)===false){event.preventDefault();event.stopImmediatePropagation();return}
  if(event.key==='Escape'&&!event.defaultPrevented){event.preventDefault();modal.close()}
 });
+}
 export class Modal{
  constructor(app){this.app=app;this.scope=new Scope();this.containerEl=document.createElement('div');this.containerEl.className='modal-container';this.containerEl.createDiv({cls:'modal-bg'}).onclick=()=>this.close();this.modalEl=this.containerEl.createDiv({cls:'modal'});this.titleEl=this.modalEl.createDiv({cls:'modal-title'});const close=this.modalEl.createEl('button',{cls:'modal-close-button',text:'×',attr:{'aria-label':'Fechar'}});close.onclick=()=>this.close();this.contentEl=this.modalEl.createDiv({cls:'modal-content'})}
  setTitle(text){this.titleEl.textContent=text}open(){this.beforeFocus=document.activeElement;modalStack.push(this);document.body.append(this.containerEl);Promise.resolve(this.onOpen?.()).catch(e=>{console.error(e);new Notice(e.message)});return this}

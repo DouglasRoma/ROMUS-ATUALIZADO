@@ -77,6 +77,51 @@ async function launch(){
   if(op==='property-types:read'){try{return JSON.parse(await fs.readFile(path.join(library.root,'.atlas-property-types.json'),'utf8'))}catch(error){if(error.code==='ENOENT')return{};throw error}}
   if(op==='property-types:write'){if(!args[0]||typeof args[0]!=='object'||Array.isArray(args[0]))throw Error('Tipos de propriedades inválidos.');return library.write('.atlas-property-types.json',JSON.stringify(args[0],null,2))}
   if(op==='external'){if(!/^https?:\/\//.test(args[0]))throw Error('Endereço inválido.');return shell.openExternal(args[0])}
+  if(op==='wikipedia:search'){
+   const {query,lang='es'}=args[0]||{};
+   if(!query)return[];
+   try{
+     const u=new URL(query.trim());
+     const m=u.hostname.match(/^([a-z-]+)\.wikipedia\.org$/i);
+     const pathMatch=u.pathname.match(/^\/wiki\/(.+)$/);
+     if(m&&pathMatch){
+       return[{title:decodeURIComponent(pathMatch[1].replace(/_/g,' ')),description:'Link direto da Wikipedia',url:u.href,lang:m[1].toLowerCase()}];
+     }
+   }catch{}
+   const target=`https://${encodeURIComponent(lang)}.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=8&namespace=0&format=json`;
+   const res=await net.fetch(target,{headers:{'User-Agent':'ROMUS/0.3.7 (Atlas Desktop)'},signal:AbortSignal.timeout(10000)});
+   if(!res.ok)return[];
+   const [,titles,descriptions,urls]=await res.json();
+   return(titles||[]).map((title,i)=>({title,description:descriptions?.[i]||'',url:urls?.[i]||'',lang}));
+  }
+  if(op==='wikipedia:fetch'){
+   let {title,lang='es',url}=args[0]||{};
+   if(!title)throw Error('Título inválido.');
+   let summary={};
+   try{
+     const sRes=await net.fetch(`https://${encodeURIComponent(lang)}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g,'_'))}`,{headers:{'User-Agent':'ROMUS/0.3.7 (Atlas Desktop)'},signal:AbortSignal.timeout(10000)});
+     if(sRes.ok)summary=await sRes.json();
+   }catch{}
+   let fullContent='';
+   try{
+     const fRes=await net.fetch(`https://${encodeURIComponent(lang)}.wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&titles=${encodeURIComponent(title)}&format=json`,{headers:{'User-Agent':'ROMUS/0.3.7 (Atlas Desktop)'},signal:AbortSignal.timeout(12000)});
+     if(fRes.ok){
+       const data=await fRes.json();
+       const page=Object.values(data.query?.pages||{})[0];
+       fullContent=page?.extract||'';
+     }
+   }catch{}
+   return{
+     title:summary.title||title,
+     lang,
+     url:url||summary.content_urls?.desktop?.page||`https://${lang}.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g,'_'))}`,
+     description:summary.description||'',
+     thumbnail:summary.thumbnail?.source||'',
+     summary:summary.extract||'',
+     content:fullContent||summary.extract||'',
+     updatedAt:Date.now()
+   };
+  }
   if(op==='import'){
    const picked=await dialog.showOpenDialog(win,{title:'Importar uma cópia da biblioteca ou cofre Obsidian',properties:['openDirectory']});if(picked.canceled)return false;
    const target=path.join(app.getPath('userData'),'libraries','import-'+Date.now()),next=new Library(target);

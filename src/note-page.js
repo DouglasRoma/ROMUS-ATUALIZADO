@@ -7,6 +7,7 @@ import {captureReadingPosition,restoreReadingPosition} from './editor-location.j
 import {stripImageEmbeds} from './image-deletion.js';
 import {openQuizImport} from './quiz-import.js';
 import {nextQuizOrder} from './quiz-order.js';
+import {openWikipediaModal,wikiToMarkdown,fetchWikipediaArticle} from './wikipedia.js';
 const covers={ocean:'linear-gradient(120deg,#153958,#3279a0,#86c5b8)',forest:'linear-gradient(115deg,#163c35,#487a63,#adc0a0)',dusk:'linear-gradient(120deg,#302b51,#70649a,#ca9ca3)',sand:'linear-gradient(120deg,#5e4532,#b49066,#d6c4a7)',ink:'linear-gradient(120deg,#171c26,#374557,#687d92)'};
 const fold=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase();
 const fileKind=path=>/\.(?:png|jpe?g|gif|webp|avif|svg|bmp)$/i.test(path)?'image':/\.pdf$/i.test(path)?'pdf':'file';
@@ -19,7 +20,7 @@ export class NotePage{
   const controls=this.controls=header.createDiv({cls:'romus-note-controls'});header.prepend(controls);const trigger=this.app.uiButton(controls,'Ferramentas da nota','ellipsis',()=>{controls.classList.toggle('is-open');trigger.setAttribute('aria-expanded',String(controls.classList.contains('is-open')))});trigger.classList.add('romus-note-tools-trigger');trigger.setAttribute('aria-label','Ferramentas da nota');trigger.setAttribute('aria-expanded','false');controls.append(actions);controls.onpointerenter=()=>trigger.setAttribute('aria-expanded','true');controls.onpointerleave=()=>{if(matchMedia('(hover:hover)').matches){controls.classList.remove('is-open');trigger.setAttribute('aria-expanded','false')}};this.outsideTools=event=>{if(!controls.contains(event.target)){controls.classList.remove('is-open');trigger.setAttribute('aria-expanded','false')}};owner.contentEl.addEventListener('pointerdown',this.outsideTools,true);
   this.cover=header.createDiv({cls:'romus-note-cover'});header.insertBefore(this.cover,owner.path);this.cover.hidden=true;
   const tools=this.coverTools=header.createDiv({cls:'romus-cover-tools'});header.insertBefore(tools,owner.path);this.app.uiButton(tools,'Adicionar capa','image-plus',()=>this.coverMenu());
-  this.tabs=header.createDiv({cls:'romus-note-sections',attr:{role:'tablist','aria-label':'Conteúdo da nota'}});this.tabButtons={};for(const [key,label,icon]of [['summary','Resumo','file-text'],['media','Mídia da nota','paperclip'],['quizzes','Quizzes','list-checks']]){const b=this.app.uiButton(this.tabs,label,icon,()=>this.show(key));b.setAttribute('role','tab');b.setAttribute('aria-selected',String(key==='summary'));this.tabButtons[key]=b}
+  this.tabs=header.createDiv({cls:'romus-note-sections',attr:{role:'tablist','aria-label':'Conteúdo da nota'}});this.tabButtons={};this.renderTabs();
   this.hub=owner.contentEl.createDiv({cls:'romus-note-hub'});this.hub.hidden=true;
   this.pageButton=this.app.uiButton(actions,'Mídia da nota','paperclip',()=>this.show('media'));this.pageButton.classList.add('romus-note-media-action');
   this.off=this.app.vault.on('media-changed',()=>{if(this.alive&&this.data){this.updateCounts();if(this.section!=='summary')this.renderHub()}});
@@ -28,12 +29,30 @@ export class NotePage{
   const prefix=raw.match(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/)?.[0]||'';if(!force&&this.prefix===prefix){this.raw=raw;return}this.prefix=prefix;
   const props=propertyDocument(raw).props,data=notePageData(props),key=JSON.stringify(props);this.raw=raw;this.data=data;
   if(this.contentOnly){if(force||key!==this.key){this.key=key;this.renderHub()}return}
-  if(!force&&key===this.key)return;this.key=key;this.properties.render(raw);this.renderCover();this.updateCounts();this.owner.outline?.scheduleGeometry();if(this.section!=='summary')this.renderHub();
+  if(!force&&key===this.key)return;this.key=key;this.properties.render(raw);this.renderCover();this.renderTabs();this.owner.outline?.scheduleGeometry();if(this.section!=='summary')this.renderHub();
  }
  async mutate(change){await this.owner.save();await this.app.vault.process(this.owner.file,text=>patchNotePage(text,change));this.owner.showProperties(await this.app.vault.read(this.owner.file),true)}
  async saveEntry(kind,entry,before){await this.mutate(data=>{const rows=data[kind]||=[],i=rows.findIndex(row=>row.id===entry.id);if(before&&JSON.stringify(rows[i])!==JSON.stringify(before))throw Error('Este conteúdo mudou em outra janela. Seu texto foi mantido; reabra para conferir.');if(i>=0)rows[i]=entry;else rows.push(entry);data[kind]=rows})}
  async removeEntry(kind,entry){await this.mutate(data=>{data[kind]=(data[kind]||[]).filter(row=>row.id!==entry.id)})}
- updateCounts(){if(this.contentOnly)return;const media=this.resources().length+(this.data.cases||[]).length,quizzes=(this.data.quizzes||[]).length;this.tabButtons.media.title=media+' itens de mídia e casos clínicos';this.tabButtons.quizzes.title=quizzes+' quizzes';this.tabButtons.media.querySelector('span:last-child').textContent='Mídia da nota'+(media?' · '+media:'');this.tabButtons.quizzes.querySelector('span:last-child').textContent='Quizzes'+(quizzes?' · '+quizzes:'')}
+ renderTabs(){
+  if(this.contentOnly)return;
+  this.tabs.empty();
+  this.tabButtons={};
+  const sections=[['summary','Resumo','file-text']];
+  if(this.data?.wikipedia){
+   sections.push(['wikipedia','Resumo Wikipedia','wikipedia']);
+  }
+  sections.push(['media','Mídia da nota','paperclip']);
+  sections.push(['quizzes','Quizzes','list-checks']);
+  for(const [key,label,icon]of sections){
+   const b=this.app.uiButton(this.tabs,label,icon,()=>this.show(key));
+   b.setAttribute('role','tab');
+   b.setAttribute('aria-selected',String(key===this.section));
+   this.tabButtons[key]=b;
+  }
+  this.updateCounts();
+ }
+ updateCounts(){if(this.contentOnly)return;const media=this.resources().length+(this.data?.cases||[]).length,quizzes=(this.data?.quizzes||[]).length;if(this.tabButtons.media){this.tabButtons.media.title=media+' itens de mídia e casos clínicos';this.tabButtons.media.querySelector('span:last-child').textContent='Mídia da nota'+(media?' · '+media:'');}if(this.tabButtons.quizzes){this.tabButtons.quizzes.title=quizzes+' quizzes';this.tabButtons.quizzes.querySelector('span:last-child').textContent='Quizzes'+(quizzes?' · '+quizzes:'');}}
  async show(section){
   if(this.contentOnly){this.section=section;this.renderHub();return}
   await this.owner.save();if(this.section==='summary')this.position=captureReadingPosition(this.owner);this.section=section;this.owner.contentEl.dataset.noteSection=section;this.owner.writingArea.hidden=section!=='summary';this.hub.hidden=section==='summary';for(const [key,b]of Object.entries(this.tabButtons))b.setAttribute('aria-selected',String(key===section));
@@ -60,12 +79,13 @@ export class NotePage{
   const rows=new Map();for(const entry of this.data?.resources||[]){const existing=this.app.media.items.get(entry.id);if(existing)rows.set(entry.id,existing);else if(!entry.local||this.app.vault.getFileByPath(entry.source)){try{const item=this.app.media.get(entry.source,entry.title,entry.local);rows.set(item.id,item)}catch{}}}
   for(const item of this.app.media.items.values())if(item.sourceNotes?.includes(this.owner.file?.path))rows.set(item.id,item);return[...rows.values()];
  }
- addMenu(anchor){const menu=new Menu();for(const [title,run]of [['YouTube, página web ou link',()=>this.linkDialog()],['Arquivos, PDF, vídeo ou áudio',()=>this.importFiles()],['Caso clínico',()=>this.caseDialog()],['Quiz de múltipla escolha',()=>this.quizDialog()]])menu.addItem(i=>i.setTitle(title).onClick(()=>Promise.resolve(run()).catch(e=>new Notice(e.message))));const rect=anchor.getBoundingClientRect();menu.showAtPosition({x:Math.max(8,rect.right-260),y:rect.bottom+5})}
+ addMenu(anchor){const menu=new Menu();for(const [title,run]of [['Página da Wikipedia',()=>this.wikipediaDialog()],['YouTube, página web ou link',()=>this.linkDialog()],['Arquivos, PDF, vídeo ou áudio',()=>this.importFiles()],['Caso clínico',()=>this.caseDialog()],['Quiz de múltipla escolha',()=>this.quizDialog()]])menu.addItem(i=>i.setTitle(title).onClick(()=>Promise.resolve(run()).catch(e=>new Notice(e.message))));const rect=anchor.getBoundingClientRect();menu.showAtPosition({x:Math.max(8,rect.right-260),y:rect.bottom+5})}
  linkDialog(){
   const modal=new Modal(this.app);modal.setTitle('Adicionar mídia à nota');modal.modalEl.addClass('romus-resource-dialog');const form=modal.contentEl;form.createEl('label',{text:'Endereço do YouTube, página, Spotify ou PDF'});const url=form.createEl('input',{attr:{type:'url',placeholder:'https://…','aria-label':'Link da mídia da nota'}});form.createEl('label',{text:'Título'});const name=form.createEl('input',{attr:{placeholder:'Como você quer chamar este conteúdo?','aria-label':'Título da mídia da nota'}});const status=form.createDiv({cls:'romus-form-error',attr:{role:'status'}}),save=this.app.uiButton(form,'Adicionar mídia','plus',async()=>{const parsed=mediaSource(url.value.trim());if(!parsed){status.textContent='Cole um endereço http:// ou https:// válido.';return}save.disabled=true;try{const item=this.app.noteMedia.register(parsed.source,this.owner.file.path);if(name.value.trim()){item.title=name.value.trim();item.customTitle=true;this.app.media.touch()}await this.mutate(d=>{d.resources||=[];if(!d.resources.some(r=>r.id===item.id))d.resources.push(this.entry(item))});await this.app.media.flush();modal.close();if(!name.value.trim()&&['youtube','spotify'].includes(item.type))window.atlasNative.call('media:metadata',item.source).then(meta=>{if(meta&&!item.customTitle&&this.app.media.items.get(item.id)===item){item.title=meta.title||item.title;item.thumbnail=meta.thumbnail||item.thumbnail;this.app.media.touch()}}).catch(()=>{})}catch(e){status.textContent=e.message}finally{save.disabled=false}});save.classList.add('mod-cta');modal.open();url.focus();
  }
  renderHub(){
   if(!this.alive||this.suspendHubRefresh)return;this.preview?.unload();this.preview=new Component();this.preview.load();this.hub.empty();this.updateCounts();
+  if(this.section==='wikipedia'){this.renderWikipedia();return;}
   const top=this.hub.createDiv({cls:'romus-hub-heading'});const title=top.createDiv();title.createEl('h2',{text:this.section==='quizzes'?'Quizzes da nota':'Mídia da nota'});title.createEl('p',{text:this.section==='quizzes'?'Pratique questões de múltipla escolha neste contexto.':'Vídeos, documentos, arquivos e casos clínicos reunidos nesta nota.'});
   const add=this.app.uiButton(top,this.section==='quizzes'?'Novo quiz':'Adicionar mídia','plus',()=>this.section==='quizzes'?this.quizDialog():this.addMenu(add));add.classList.add('mod-cta');
   if(this.section==='quizzes'){this.app.uiButton(top,'Importar Markdown','file-up',()=>openQuizImport(this));this.renderQuizzes();return}
@@ -98,5 +118,75 @@ export class NotePage{
   }
   if(quizzes.length>limit)this.app.uiButton(this.hub,'Mostrar mais quizzes · '+Math.min(limit,quizzes.length)+' de '+quizzes.length,'chevrons-down',()=>{this.quizLimit=limit+10;this.renderHub()});
  }
- dispose(){this.alive=false;this.off?.();this.preview?.unload();this.owner.contentEl.removeEventListener('pointerdown',this.outsideTools,true)}
+ renderWikipedia(){
+  const wiki=this.data?.wikipedia;
+  if(!wiki){
+   this.empty(this.hub,'Nenhuma página da Wikipedia vinculada.','Vincule um artigo para consultar seu conteúdo diretamente nesta nota.');
+   const btn=this.app.uiButton(this.hub,'Vincular página da Wikipedia','wikipedia',()=>this.wikipediaDialog());
+   btn.classList.add('mod-cta');
+   return;
+  }
+  const container=this.hub.createDiv({cls:'romus-wiki-view'});
+  const header=container.createDiv({cls:'romus-wiki-header'});
+  const headLeft=header.createDiv({cls:'romus-wiki-head-main'});
+  const kicker=headLeft.createDiv({cls:'romus-wiki-kicker'});
+  setIcon(kicker.createSpan({cls:'romus-wiki-kicker-icon'}),'wikipedia');
+  kicker.createSpan({text:'WIKIPEDIA ('+(wiki.lang||'es').toUpperCase()+')'});
+  headLeft.createEl('h2',{cls:'romus-wiki-title',text:wiki.title});
+  if(wiki.description)headLeft.createEl('p',{cls:'romus-wiki-desc',text:wiki.description});
+  const actions=header.createDiv({cls:'romus-wiki-actions'});
+  if(wiki.url){
+   this.app.uiButton(actions,'Abrir no navegador','external-link',()=>window.atlasNative?.call('external',wiki.url));
+  }
+  this.app.uiButton(actions,'Atualizar','rotate-ccw',()=>this.refreshWikipedia());
+  this.app.uiButton(actions,'Trocar página','search',()=>this.wikipediaDialog());
+  this.app.uiButton(actions,'Desvincular','trash-2',()=>this.unlinkWikipedia());
+  if(wiki.thumbnail){
+   const hero=container.createDiv({cls:'romus-wiki-hero'});
+   hero.createEl('img',{cls:'romus-wiki-thumb',attr:{src:wiki.thumbnail,alt:wiki.title,loading:'lazy'}});
+   if(wiki.summary){
+    const summaryBox=hero.createDiv({cls:'romus-wiki-lead'});
+    summaryBox.createEl('strong',{text:'Resumo Introdutório'});
+    summaryBox.createEl('p',{text:wiki.summary});
+   }
+  }else if(wiki.summary&&wiki.content&&wiki.content!==wiki.summary){
+   const leadBox=container.createDiv({cls:'romus-wiki-lead romus-wiki-lead-full'});
+   leadBox.createEl('strong',{text:'Resumo Introdutório'});
+   leadBox.createEl('p',{text:wiki.summary});
+  }
+  const body=container.createDiv({cls:'romus-wiki-body markdown-preview'});
+  const rawText=wiki.content||wiki.summary||'';
+  const markdown=wikiToMarkdown(rawText);
+  MarkdownRenderer.render(this.app,markdown,body,this.owner.file.path,this.preview);
+ }
+ async setWikipedia(article){
+  await this.mutate(d=>{d.wikipedia=article});
+  this.renderTabs();
+  await this.show('wikipedia');
+  new Notice(`Página "${article.title}" vinculada da Wikipedia.`);
+ }
+ async unlinkWikipedia(){
+  await this.mutate(d=>{delete d.wikipedia});
+  this.renderTabs();
+  await this.show('summary');
+  new Notice('Página da Wikipedia desvinculada.');
+ }
+ async refreshWikipedia(){
+  const current=this.data?.wikipedia;
+  if(!current?.title)return;
+  new Notice('Atualizando artigo da Wikipedia…');
+  try{
+   const updated=await fetchWikipediaArticle(current.title,current.lang||'es',current.url);
+   await this.setWikipedia(updated);
+  }catch(e){
+   new Notice('Erro ao atualizar Wikipedia: '+e.message);
+  }
+ }
+ wikipediaDialog(){
+  openWikipediaModal(this.app,{
+   term:this.data?.wikipedia?.title||this.owner.file.basename||'',
+   onLink:async(article)=>{await this.setWikipedia(article)}
+  });
+ }
+  dispose(){this.alive=false;this.off?.();this.preview?.unload();this.owner.contentEl.removeEventListener('pointerdown',this.outsideTools,true)}
 }
