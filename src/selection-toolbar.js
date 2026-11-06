@@ -3,6 +3,7 @@ import {setIcon} from './compat.js';
 import {openColorPalette,closeColorPalette} from './color-palette.js';
 import {textPaintAttributes,originalTextColor} from './highlight-color.js';
 import {openWikipediaModal} from './wikipedia.js';
+import {patchNotePage} from './note-page-data.js';
 const safeColor=value=>/^#[a-f\d]{6}$/i.test(value||'')?value:null;
 function paintSelection(editor,attribute,value){editor.chain().focus(undefined,{scrollIntoView:false}).command(({tr,state})=>{const type=state.schema.marks.textPaint,{from,to}=state.selection;state.doc.nodesBetween(from,to,(node,pos)=>{if(!node.isText)return;const previous=node.marks.find(mark=>mark.type===type),attrs={...(previous?.attrs||{}),[attribute]:value},start=Math.max(from,pos),end=Math.min(to,pos+node.nodeSize);if(attribute==='background')attrs.autoForeground=value?true:null;else if(attrs.background)attrs.autoForeground=value?false:true;tr.removeMark(start,end,type);if(attrs.color||attrs.background)tr.addMark(start,end,type.create(attrs))});return true}).run()}
 export const TextPaint=Mark.create({
@@ -27,7 +28,33 @@ export class SelectionToolbar{
   this.colorInput('Cor da fonte','color','#75b8ff');this.colorInput('Cor de fundo','background','#d9b84a');
   button('Inserir link','link',()=>this.openLink());
   button('Criar ou vincular nota ao lado','file-plus',()=>{const {from,to}=this.editor.state.selection,title=this.editor.state.doc.textBetween(from,to,' ').trim();if(!title)return;this.editor.chain().focus(undefined,{scrollIntoView:false}).setLink({href:'atlas-note:'+encodeURIComponent(title)}).run();this.owner.flushToOwner();this.owner.app.openNoteLink(title,this.owner.owner.file.path).catch(error=>{this.owner.owner.status.textContent=error.message})});
-   button('Vincular à Wikipedia','wikipedia',()=>{const {from,to}=this.editor.state.selection,term=this.editor.state.doc.textBetween(from,to,' ').trim();openWikipediaModal(this.owner.app,{term,onLink:async(article)=>{if(article.url&&from!==to){this.editor.chain().focus(undefined,{scrollIntoView:false}).setLink({href:article.url}).run();this.owner.flushToOwner();}const notePage=this.owner.owner;if(notePage&&typeof notePage.setWikipedia==='function'){await notePage.setWikipedia(article);}}});});
+   button('Vincular à Wikipedia','wikipedia',()=>{
+    const {from,to}=this.editor.state.selection,term=this.editor.state.doc.textBetween(from,to,' ').trim();
+    openWikipediaModal(this.owner.app,{
+     term,
+     onLink:async(article)=>{
+      const noteTitle=article.title||term;
+      if(!noteTitle)return;
+      if(from!==to){
+       this.editor.chain().focus(undefined,{scrollIntoView:false}).setLink({href:'atlas-note:'+encodeURIComponent(noteTitle)}).run();
+       this.owner.flushToOwner();
+      }
+      try{
+       const leaf=await this.owner.app.openNoteLink(noteTitle,this.owner.owner.file.path);
+       if(leaf?.view?.notePage){
+        await leaf.view.notePage.setWikipedia(article);
+       }else{
+        const targetFile=this.owner.app.metadataCache.getFirstLinkpathDest(noteTitle,this.owner.owner.file.path);
+        if(targetFile){
+         await this.owner.app.vault.process(targetFile,text=>patchNotePage(text,d=>{d.wikipedia=article}));
+        }
+       }
+      }catch(error){
+       this.owner.owner.status.textContent=error.message;
+      }
+     }
+    });
+   });
   button('Remover formatação','remove-formatting',()=>this.editor.chain().focus().unsetAllMarks().clearNodes().run());
   this.reposition=()=>this.schedule();owner.host.closest('.atlas-writing-area')?.addEventListener('scroll',this.reposition,{passive:true});window.addEventListener('resize',this.reposition);
   this.outside=event=>{if(!this.element.contains(event.target)&&!owner.host.contains(event.target)&&!event.target.closest('.atlas-common-palette'))this.element.hidden=true};document.addEventListener('pointerdown',this.outside,true);

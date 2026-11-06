@@ -12,6 +12,7 @@ import {splitNoteContent,mergeNoteContent,summaryText} from './note-content.js';
 import {SelectionToolbar,TextPaint} from './selection-toolbar.js';
 import {captureReadingPosition,restoreReadingPosition} from './editor-location.js';
 import {Notice} from './compat.js';
+import {parseWikipediaUrl,fetchWikipediaArticle} from './wikipedia.js';
 export async function removeRenderedImage(owner,index,refresh){
  const position=captureReadingPosition(owner);owner.formatted||=new FormattedEditor(owner,owner.richHost);owner.formatted.load(owner.input.value);const editor=owner.formatted.editor,images=[];editor.state.doc.descendants((node,pos)=>{if(node.type.name==='image')images.push({pos,size:node.nodeSize})});const image=images[index];if(!image)throw Error('A imagem mudou. Abra a edição para conferir.');editor.commands.deleteRange({from:image.pos,to:image.pos+image.size});await owner.save();await refresh();owner.outline?.refresh();restoreReadingPosition(owner,position);owner.rendered.tabIndex=-1;owner.rendered.focus({preventScroll:true});
  if(!owner.previewImageUndoDispose){const key=event=>{if(owner.editorMode!=='preview'||!(event.ctrlKey||event.metaKey)||event.key.toLowerCase()!=='z'||event.target.closest('input,textarea')||owner.previewImageUndoBusy)return;const action=event.shiftKey?'redo':'undo';if(!editor.can()[action]())return;event.preventDefault();event.stopPropagation();owner.previewImageUndoBusy=true;const position=captureReadingPosition(owner);editor.commands[action]();Promise.resolve().then(()=>owner.save()).then(refresh).then(()=>{owner.outline?.refresh();restoreReadingPosition(owner,position)}).catch(error=>new Notice(error.message)).finally(()=>{owner.previewImageUndoBusy=false})};owner.contentEl.addEventListener('keydown',key,true);owner.previewImageUndoDispose=()=>owner.contentEl.removeEventListener('keydown',key,true)}
@@ -33,7 +34,31 @@ export class FormattedEditor{
    editorProps:{attributes:{'aria-label':'Texto formatado da nota',role:'textbox','aria-multiline':'true',spellcheck:'true'},handleKeyDown:(_,event)=>this.onKey(event)},
    onUpdate:()=>{if(this.loading||this.completeWikiLink())return;this.dirty=true;owner.status.textContent='Salvando…';clearTimeout(this.serializeTimer);this.serializeTimer=setTimeout(()=>this.flushToOwner(),280);this.scheduleLinks();this.updateSuggestions();owner.slash?.update();this.bubble?.schedule()},onSelectionUpdate:()=>{this.updateSuggestions();owner.slash?.update();this.bubble?.schedule()},onFocus:()=>this.bubble?.schedule(),onBlur:()=>requestAnimationFrame(()=>{if(!this.editor.isDestroyed)this.bubble?.schedule()})});
   this.bubble=new SelectionToolbar(this);
-  host.addEventListener('click',this.click=event=>{const link=event.target.closest('a');if(!link?.getAttribute('href')?.startsWith('atlas-note:'))return;event.preventDefault();const target=decodeURIComponent(link.getAttribute('href').slice(11));this.app.openNoteLink(target,owner.file.path,event)});
+  host.addEventListener('click',this.click=async event=>{
+   const link=event.target.closest('a');
+   if(!link)return;
+   const href=link.getAttribute('href');
+   if(!href)return;
+   if(href.startsWith('atlas-note:')){
+    event.preventDefault();
+    const target=decodeURIComponent(href.slice(11));
+    this.app.openNoteLink(target,owner.file.path,event);
+    return;
+   }
+   const wiki=parseWikipediaUrl(href);
+   if(wiki){
+    event.preventDefault();
+    const leaf=await this.app.openNoteLink(wiki.title,owner.file.path,event);
+    if(leaf?.view?.notePage&&!leaf.view.notePage.data?.wikipedia){
+     fetchWikipediaArticle(wiki.title,wiki.lang,wiki.url).then(art=>leaf.view.notePage.setWikipedia(art)).catch(()=>{});
+    }
+    return;
+   }
+   if(/^https?:\/\//i.test(href)){
+    event.preventDefault();
+    window.atlasNative?.call('external',href);
+   }
+  });
  }
  load(body){
   if(this.loadedBody===body&&!this.dirty)return false;
