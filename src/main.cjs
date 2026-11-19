@@ -127,7 +127,35 @@ async function launch(){
    const target=path.join(app.getPath('userData'),'libraries','import-'+Date.now()),next=new Library(target);
    await next.importFrom(picked.filePaths[0]);config.library=target;await saveConfig();library=next;return true;
   }
-  if(op==='export'){
+   if(op==='pdf:export'){
+    const {html,title='documento'}=args[0]||{};
+    const defaultName=`${String(title).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').trim()||'whiteboard'}.pdf`;
+    const picked=await dialog.showSaveDialog(win,{
+      title:'Exportar Whiteboard em PDF',
+      defaultPath:defaultName,
+      filters:[{name:'Documento PDF (*.pdf)',extensions:['pdf']}]
+    });
+    if(picked.canceled||!picked.filePath)return null;
+
+    const printWin=new BrowserWindow({
+      show:false,
+      webPreferences:{nodeIntegration:false,contextIsolation:true}
+    });
+    try{
+      await printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      await new Promise(r=>setTimeout(r,400));
+      const data=await printWin.webContents.printToPDF({
+        printBackground:true,
+        pageSize:'A4',
+        margins:{top:0.4,bottom:0.4,left:0.4,right:0.4}
+      });
+      await fs.writeFile(picked.filePath,data);
+      return picked.filePath;
+    }finally{
+      printWin.destroy();
+    }
+   }
+   if(op==='export'){
    const picked=await dialog.showOpenDialog(win,{title:'Escolher pasta para exportar uma cópia',properties:['openDirectory','createDirectory']});if(picked.canceled)return false;
    const target=path.join(picked.filePaths[0],'Image-Atlas-export-'+Date.now());if(target.startsWith(library.root+path.sep))throw Error('Escolha uma pasta fora da biblioteca.');await fs.cp(library.root,target,{recursive:true,errorOnExist:true,force:false});return target;
   }

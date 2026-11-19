@@ -1,3 +1,4 @@
+import {ExcalidrawView} from './excalidraw-view.js';
 import {MediaStore} from './media-store.js';
 import {renderBoardTree} from './board-tree.js';
 import {installSidebar} from './sidebar.js';
@@ -51,6 +52,8 @@ class Vault extends Events{
  async rename(file,path){const old=file.path;await native.call('rename',old,path);this.files.delete(old);Object.assign(file,fileObject({path,stat:{...file.stat,mtime:Date.now()}}));this.files.set(path,file);const parts=path.split('/');parts.pop();while(parts.length){this.folders.add(parts.join('/'));parts.pop()}this.trigger('rename',file,old)}
 }
 const app={vault:await new Vault().init(),factories:new Map(),extensions:new Map(),commands:[]};
+app.factories.set('excalidraw', leaf => new ExcalidrawView(leaf));
+app.extensions.set('excalidraw', 'excalidraw');
 window.atlasApp=app;app.mediaOwnedPaths=new Set();
 app.mediaError=error=>new Notice(error.message);
 app.propertyTypes=await native.call('property-types:read');app.info=await native.call('info');
@@ -72,7 +75,29 @@ app.fileManager={generateMarkdownLink:(file,source,subpath='',alias='')=>`[[${fi
 class Leaf{
  constructor(split=false){this.id=crypto.randomUUID();document.querySelector('.welcome')?.remove();this.app=app;this.containerEl=document.getElementById('workspaces').createDiv({cls:'workspace-leaf'});this.containerEl.addEventListener('pointerdown',()=>{if(this.view&&app.workspace.activeLeaf!==this)app.workspace.revealLeaf(this)},true);this.split=split;if(split&&app.workspace.activeLeaf){this.splitPartner=app.workspace.activeLeaf;this.splitPartner.splitPartner=this}this.tab=document.getElementById('tabs').createDiv({cls:'tab'});document.getElementById('romus-new-tab')?.before(this.tab);this.label=this.tab.createEl('button',{text:'Nova aba'});this.label.onclick=()=>app.workspace.revealLeaf(this);const close=this.tab.createEl('button',{text:'×',attr:{'aria-label':'Fechar aba'}});close.onclick=()=>this.close().catch(e=>new Notice(e.message));app.workspace.leaves.push(this);app.panes?.attach(this,split)}
  async setViewState(spec){await this.disposeView();const factory=app.factories.get(spec.type);if(!factory)throw Error('Tela não disponível: '+spec.type);this.view=factory(this);Component.prototype.load.call(this.view);await this.view.onOpen?.();await this.view.setState?.(spec.state||{},{});this.label.textContent=this.view.getDisplayText();await app.workspace.revealLeaf(this)}
- async openFile(file,options={}){if(options.reusePane&&this.view?.file?.path===file.path)return app.workspace.revealLeaf(this);const media=app.media?.byNote(file);if(media){await this.setViewState({type:'atlas-media-player',state:{id:media.id,summary:true}});return}if(file.extension==='pdf'&&app.mediaUI){const item=app.media.get(file.path,file.basename,true);await this.setViewState({type:'atlas-media-player',state:{id:item.id}});return}const existing=!options.reusePane&&app.workspace.leaves.find(leaf=>leaf!==this&&leaf.view?.file?.path===file.path&&(file.extension==='imageboard'||!this.split));if(existing){if(!this.view)await this.close();await app.workspace.revealLeaf(existing);return}await this.disposeView();this.file=file;const factory=app.factories.get(app.extensions.get(file.extension));this.view=factory?factory(this):new NoteEditor(this);this.view.file=file;Component.prototype.load.call(this.view);await this.view.onOpen?.();if(factory)this.view.setViewData(await app.vault.read(file),true);else if(file.extension==='md')await this.view.readFile(file);else{this.view.contentEl.empty();const img=this.view.contentEl.createEl('img',{cls:'resource-preview'});img.src=app.vault.getResourcePath(file)}this.label.textContent=file.basename;await app.workspace.revealLeaf(this);renderFiles()}
+ async openFile(file,options={}){
+  if(options.reusePane&&this.view?.file?.path===file.path)return app.workspace.revealLeaf(this);
+  const media=app.media?.byNote(file);
+  if(media){await this.setViewState({type:'atlas-media-player',state:{id:media.id,summary:true}});return}
+  if(file.extension==='pdf'&&app.mediaUI){const item=app.media.get(file.path,file.basename,true);await this.setViewState({type:'atlas-media-player',state:{id:item.id}});return}
+  const isExcalidraw=file.extension==='excalidraw'||file.name.endsWith('.excalidraw.md')||file.path.endsWith('.excalidraw.md');
+  const existing=!options.reusePane&&app.workspace.leaves.find(leaf=>leaf!==this&&leaf.view?.file?.path===file.path&&(file.extension==='imageboard'||isExcalidraw||!this.split));
+  if(existing){if(!this.view)await this.close();await app.workspace.revealLeaf(existing);return}
+  await this.disposeView();
+  this.file=file;
+  const viewType=isExcalidraw?'excalidraw':app.extensions.get(file.extension);
+  const factory=app.factories.get(viewType);
+  this.view=factory?factory(this):new NoteEditor(this);
+  this.view.file=file;
+  Component.prototype.load.call(this.view);
+  await this.view.onOpen?.();
+  if(factory)this.view.setViewData(await app.vault.read(file),true);
+  else if(file.extension==='md')await this.view.readFile(file);
+  else{this.view.contentEl.empty();const img=this.view.contentEl.createEl('img',{cls:'resource-preview'});img.src=app.vault.getResourcePath(file)}
+  this.label.textContent=file.basename;
+  await app.workspace.revealLeaf(this);
+  renderFiles()
+ }
  async disposeView(){app.navigation?.capture(this);if(this.view){await this.view.onClose?.();this.view.unload();this.view=null}this.containerEl.empty()}
  async close(){if(this.splitPartner){this.splitPartner.splitPartner=null;this.splitPartner=null}await this.disposeView();this.containerEl.remove();this.tab.remove();app.workspace.leaves.splice(app.workspace.leaves.indexOf(this),1);const next=app.panes?.remove(this);if(app.workspace.activeLeaf===this){app.workspace.activeLeaf=null;const last=next||app.workspace.leaves.at(-1);if(!app.workspace.closingAll){if(last)await app.workspace.revealLeaf(last);else showWelcome()}}}
 }
@@ -179,21 +204,27 @@ app.workspace.on('hover-link',async({event,targetEl,linktext,sourcePath})=>{
 });
 let hoveredNoteLink;
 document.addEventListener('pointerover',event=>{
- const link=event.target.closest('a.internal-link, a[data-href], a[href*="wikipedia.org"], a[href^="atlas-note:"]');
+ const link=event.target.closest('a.internal-link, a[data-href], a[href*="wikipedia.org"], a[href^="atlas-note:"], a[href^="atlas-cloze:"], .romus-cloze-pill, .romus-cloze-body');
  const href=link?.getAttribute('href')||'';
  const wiki=parseWikipediaUrl(href);
  let linktext=link?.dataset?.href;
  if(!linktext){
   if(href.startsWith('atlas-note:')){
    try{linktext=decodeURIComponent(href.slice(11))}catch{linktext=href.slice(11)}
+  }else if(href.startsWith('atlas-cloze:')||link?.classList?.contains('romus-cloze-pill')||link?.classList?.contains('romus-cloze-body')){
+   const txt=link.dataset?.clozeAnswer||link.textContent.trim();
+   const file=app.metadataCache?.getFirstLinkpathDest?.(txt,app.workspace.getActiveFile()?.path||'');
+   if(file){
+    linktext=file.basename;
+   }
   }else if(wiki){
    linktext=wiki.title;
   }else{
    linktext=href;
   }
  }
- hoveredNoteLink=link?{link,x:event.clientX,y:event.clientY,linktext}:null;
- if(link&&!link.closest('.ia-fsrs-view')&&(event.ctrlKey||event.metaKey)){
+ hoveredNoteLink=link&&linktext?{link,x:event.clientX,y:event.clientY,linktext}:null;
+ if(hoveredNoteLink&&!link.closest('.ia-fsrs-view')&&(event.ctrlKey||event.metaKey)){
   app.workspace.trigger('hover-link',{event,targetEl:link,linktext,sourcePath:link.closest('[data-preview-note-path]')?.dataset.previewNotePath||app.workspace.getActiveFile()?.path||''});
  }
 });
@@ -221,29 +252,47 @@ function filePalette(){return app.openOmniSearch?.()}
 function promptText(title,initial,save){const modal=new Modal(app);modal.setTitle(title);const input=modal.contentEl.createEl('input',{attr:{'aria-label':title},value:initial});button(modal.contentEl,'Salvar','check',async()=>{if(!input.value.trim())return;await save(input.value.trim());modal.close()});input.onkeydown=event=>{if(event.key==='Enter')modal.contentEl.querySelector('button').click()};modal.open();input.focus();input.select()}
 function renameNote(file){if(!file)return;const media=app.media?.byNote(file);if(media){app.mediaUI.rename(media);return}promptText('Renomear nota',file.basename,async name=>{const folder=file.path.split('/').slice(0,-1).join('/');await app.fileManager.renameFile(file,normalizePath(folder+'/'+name.replace(/[\\/:*?"<>|]/g,' ')+'.md'));renderFiles()})}
 function newNote(folder=app.preferences.notesFolder||'Notas',target){promptText('Criar nota','Nova nota',async name=>{const file=await app.vault.create((folder?folder+'/':'')+name.replace(/[\\/:*?"<>|]/g,' ')+'.md','# '+name+'\n\n');await (target&&app.workspace.leaves.includes(target)?target:app.workspace.getLeaf('tab')).openFile(file,{reusePane:!!target})})}
+function newExcalidrawDrawing(folder='Excalidraw',target){
+ const dateStr=new Date().toISOString().slice(0,19).replace('T',' ').replace(/:/g,'.');
+ promptText('Criar Whiteboard Excalidraw','Desenho '+dateStr,async name=>{
+  const targetFolder=folder||'Excalidraw';
+  if(!app.vault.folders.has(targetFolder))await app.vault.createFolder(targetFolder);
+  const filePath=targetFolder+'/'+name.replace(/[\\/:*?"<>|]/g,' ')+'.excalidraw.md';
+  const initialContent='---\n\nexcalidraw-plugin: parsed\ntags: [excalidraw]\n\n---\n==⚠ Switch to EXCALIDRAW VIEW in the MORE OPTIONS menu of this document. ⚠== You can decompress Drawing data with the command palette: \'Decompress current Excalidraw file\'. For more info check in plugin settings under \'Saving\'\n\n\n# Excalidraw Data\n\n## Text Elements\n\n%%\n# Drawing\n```compressed-json\n```\n%%\n';
+  const file=await app.vault.create(filePath,initialContent);
+  const leaf=target&&app.workspace.leaves.includes(target)?target:app.workspace.getLeaf('tab');
+  await leaf.openFile(file,{reusePane:!!target});
+  new Notice('Whiteboard Excalidraw criado!');
+ });
+}
+app.newExcalidrawDrawing=newExcalidrawDrawing;
+app.commands.push({id:'novo-excalidraw',name:'Criar Whiteboard Excalidraw (desenho livre)',callback:()=>newExcalidrawDrawing()});
+
 function renderFiles(){
  if(document.body.classList.contains('atlas-dragging-note')||document.body.classList.contains('atlas-dragging-board')){app.sidebarNeedsRender=true;return}
  const host=document.getElementById('files'),scroll=host.scrollTop,query=document.getElementById('file-search').value.toLocaleLowerCase();
  const open=new Map([...host.querySelectorAll('details')].map(el=>[el.dataset.treeKey??el.dataset.folder??el.dataset.kind,el.open]));host.empty();
- const active=app.workspace.getActiveFile()?.path,all=app.vault.getFiles().filter(f=>f.extension==='imageboard'||app.noteCatalog.isMainNote(f));
- for(const [kind,label]of [['imageboard','Quadros'],['md','Notas recentes']]){
-  const files=kind==='md'?app.recentNotes.files().filter(file=>file.basename.toLocaleLowerCase().includes(query)):all.filter(file=>file.extension===kind).sort((a,b)=>a.path.localeCompare(b.path));if(!files.length&&kind!=='md')continue;
-  const section=host.createEl('details',{cls:'atlas-file-section'});section.dataset.kind=kind;section.open=!!query||(open.get(kind)??true);const summary=section.createEl('summary');summary.createSpan({text:label});if(kind==='imageboard'){summary.dataset.boardRootDrop='true';summary.title='Solte um subwhiteboard aqui para movê-lo para os quadros principais'}const group=section.createDiv({cls:'atlas-file-group'});
-  const createRow=(file,target,parent='')=>{
-   const el=target.createEl('button',{cls:'library-file',attr:{title:fileLabel(file),'aria-current':String(file.path===active?'page':'false')}});el.dataset.path=file.path;if(kind==='imageboard')app.bindBoardDrag(el,file,parent);const icon=el.createSpan();setIcon(icon,file.extension==='imageboard'?'panels-top-left':'file-text');el.createSpan({text:file.basename});el.onclick=()=>app.workspace.getLeaf('tab').openFile(file).catch(e=>new Notice(e.message));
-   el.oncontextmenu=event=>{event.preventDefault();if(file.extension==='md'){app.showNoteMenu(file,event);return}const menu=new Menu();menu.addItem(i=>i.setTitle('Abrir whiteboard').onClick(()=>app.workspace.getLeaf('tab').openFile(file)));menu.addItem(i=>i.setTitle('Mover whiteboard…').onClick(()=>app.pickBoardParent(file,parent)));menu.addSeparator();menu.addItem(i=>i.setTitle('Excluir quadro').onClick(()=>app.deleteFile(file)));menu.showAtMouseEvent(event)};
-  };
-  if(kind==='imageboard')renderBoardTree(app,group,files,{query,open,active,createRow});
-  else{for(const file of files)createRow(file,group);if(!files.length)group.createDiv({cls:'atlas-recents-empty',text:query?'Nenhuma nota recente encontrada.':'As notas que você abrir aparecerão aqui.'});const more=group.createEl('button',{cls:'atlas-recents-library',text:'Ver todas as notas',attr:{type:'button'}});more.onclick=openNotesLibrary}
- }
- host.scrollTop=scroll;const overview=document.querySelector('.atlas-library-overview');if(overview)overview.textContent=`${all.filter(f=>f.extension==='md').length} notas · ${all.filter(f=>f.extension==='imageboard').length} quadros`;
+ const isExcalidraw=f=>f.extension==='excalidraw'||f.name.endsWith('.excalidraw.md')||f.path.endsWith('.excalidraw.md');
+ const active=app.workspace.getActiveFile()?.path,all=app.vault.getFiles().filter(f=>f.extension==='imageboard'||isExcalidraw(f)||app.noteCatalog.isMainNote(f));
+ for(const [kind,label]of [['imageboard','Quadros e desenhos'],['md','Notas recentes']]){
+   const files=kind==='md'?app.recentNotes.files().filter(file=>!isExcalidraw(file)&&file.basename.toLocaleLowerCase().includes(query)):all.filter(file=>file.extension===kind||(kind==='imageboard'&&isExcalidraw(file))).sort((a,b)=>a.path.localeCompare(b.path));if(!files.length&&kind!=='md')continue;
+   const section=host.createEl('details',{cls:'atlas-file-section'});section.dataset.kind=kind;section.open=!!query||(open.get(kind)??true);const summary=section.createEl('summary');summary.createSpan({text:label});if(kind==='imageboard'){summary.dataset.boardRootDrop='true';summary.title='Solte um subwhiteboard aqui para movê-lo para os quadros principais'}const group=section.createDiv({cls:'atlas-file-group'});
+   const createRow=(file,target,parent='')=>{
+    const ex=isExcalidraw(file);
+    const el=target.createEl('button',{cls:'library-file',attr:{title:fileLabel(file),'aria-current':String(file.path===active?'page':'false')}});el.dataset.path=file.path;if(kind==='imageboard'&&!ex)app.bindBoardDrag(el,file,parent);const icon=el.createSpan();setIcon(icon,ex?'palette':file.extension==='imageboard'?'panels-top-left':'file-text');el.createSpan({text:file.basename});el.onclick=()=>app.workspace.getLeaf('tab').openFile(file).catch(e=>new Notice(e.message));
+    el.oncontextmenu=event=>{event.preventDefault();if(ex){const menu=new Menu();menu.addItem(i=>i.setTitle('Abrir desenho Excalidraw').onClick(()=>app.workspace.getLeaf('tab').openFile(file)));menu.addItem(i=>i.setTitle('Renomear…').onClick(()=>renameNote(file)));menu.addSeparator();menu.addItem(i=>i.setTitle('Excluir desenho').onClick(()=>app.deleteFile(file)));menu.showAtMouseEvent(event);return;}if(file.extension==='md'){app.showNoteMenu(file,event);return}const menu=new Menu();menu.addItem(i=>i.setTitle('Abrir whiteboard').onClick(()=>app.workspace.getLeaf('tab').openFile(file)));menu.addItem(i=>i.setTitle('Mover whiteboard…').onClick(()=>app.pickBoardParent(file,parent)));menu.addSeparator();menu.addItem(i=>i.setTitle('Excluir quadro').onClick(()=>app.deleteFile(file)));menu.showAtMouseEvent(event)};
+   };
+   if(kind==='imageboard')renderBoardTree(app,group,files,{query,open,active,createRow});
+   else{for(const file of files)createRow(file,group);if(!files.length)group.createDiv({cls:'atlas-recents-empty',text:query?'Nenhuma nota recente encontrada.':'As notas que você abrir aparecerão aqui.'});const more=group.createEl('button',{cls:'atlas-recents-library',text:'Ver todas as notas',attr:{type:'button'}});more.onclick=openNotesLibrary}
+  }
+ host.scrollTop=scroll;const overview=document.querySelector('.atlas-library-overview');if(overview)overview.textContent=`${all.filter(f=>f.extension==='md'&&!isExcalidraw(f)).length} notas · ${all.filter(f=>f.extension==='imageboard'||isExcalidraw(f)).length} quadros/desenhos`;
  for(const el of document.querySelectorAll('#primary-actions [data-sidebar-view]'))el.setAttribute('aria-current',app.workspace.activeLeaf?.view?.getViewType()===el.dataset.sidebarView?'page':'false');
 }
 function showWelcome(){const host=document.getElementById('workspaces');if(app.workspace.leaves.length)return;app.navigation?.visit(null);host.querySelector('.welcome')?.remove();const welcome=host.createDiv({cls:'welcome'});const symbol=welcome.createDiv({cls:'welcome-symbol'});symbol.createEl('img',{cls:'romus-logo-on-dark',attr:{src:'assets/brand/romus-horizontal.svg',alt:'ROMUS'}});symbol.createEl('img',{cls:'romus-logo-on-light',attr:{src:'assets/brand/romus-horizontal-dark.svg',alt:'ROMUS'}});welcome.createEl('h1',{text:'Conhecimento que ganha conexões.'});welcome.createEl('p',{text:'Organize ideias em mapas visuais, conecte suas notas e transforme o que aprendeu em memória.'});const actions=welcome.createDiv({cls:'welcome-actions'});button(actions,'Criar meu primeiro whiteboard','plus',()=>plugin.newBoard());button(actions,'Importar biblioteca do Obsidian','folder-open',importLibrary);button(actions,'Explorar exemplo','sparkles',()=>createDemo());welcome.createEl('small',{text:'Seus arquivos ficam neste computador. Sem conta, sem envio automático para a nuvem.'})}
 async function flush(){for(const editor of app.embeddedEditors||[])await editor.save();for(const leaf of app.workspace.leaves){leaf.view?.flushCameraFrame?.();await leaf.view?.save?.()}await Promise.all([...(plugin.visualWrites?.values()||[]),...(plugin.indexWrites?.values()||[])]);await plugin.noteRenameWrite;await plugin.reviewStore?.flush();await Promise.all([...app.vault.locks.values()]);await app.media?.flush()}
 async function importLibrary(){await flush();if(await native.call('import'))location.reload()}
-installSidebar(app,{newBoard:()=>plugin.newBoard(),newNote,notes:openNotesLibrary,media:openMediaLibrary,reviews:()=>runCommand('review-today-fsrs'),maps:()=>runCommand('search-whiteboards'),search:filePalette,commands:commandPalette,settings:()=>new SettingsModal(app).open(),trash:()=>app.openTrash(),import:importLibrary,export:async()=>{await flush();const target=await native.call('export');if(target)new Notice('Cópia exportada para '+target)},theme:()=>app.setTheme(document.documentElement.dataset.theme==='light'?'dark':'light')});
-const plugin=new ImageAtlasPlugin(app);window.atlasPlugin=plugin;app.plugin=plugin;await plugin.load();installReviewInteractions(app);installRomusUI(app);installNewTab(app,{createNote:leaf=>newNote(app.preferences.notesFolder||'Notas',leaf)});await app.noteCatalog.refresh();installBoardAppearance(app);installStudyWorkspace(app);installFlashcardSearch(app);app.factories.set('atlas-notes-library',leaf=>new NotesLibrary(leaf));app.media=await new MediaStore(app).init();installMediaUI(app);installOmniSearch(app);app.refreshMediaBoards=mediaId=>{for(const leaf of app.workspace.getLeavesOfType('image-atlas-board'))if(!mediaId||leaf.view.board.nodes.some(node=>node.mediaId===mediaId))leaf.view.render()};app.vault.on('rename',(file,old)=>{for(const item of app.media.items.values()){if(item.notePath===old){app.media.noteOwners.delete(old);item.notePath=file.path;app.media.own(item);app.mediaOwnedPaths.delete(old);app.mediaOwnedPaths.add(file.path);app.media.touch()}if(item.local&&item.source===old){app.media.byKey.delete(item.key);item.source=file.path;item.key='pdf:'+file.path;app.media.byKey.set(item.key,item);app.media.touch()}for(const ref of item.refs)if(ref.boardPath===old){ref.boardPath=file.path;app.media.touch()}}});
+installSidebar(app,{newBoard:()=>plugin.newBoard(),newNote,newExcalidraw:()=>newExcalidrawDrawing(),notes:openNotesLibrary,media:openMediaLibrary,reviews:()=>runCommand('review-today-fsrs'),maps:()=>runCommand('search-whiteboards'),search:filePalette,commands:commandPalette,settings:()=>new SettingsModal(app).open(),trash:()=>app.openTrash(),import:importLibrary,export:async()=>{await flush();const target=await native.call('export');if(target)new Notice('Cópia exportada para '+target)},theme:()=>app.setTheme(document.documentElement.dataset.theme==='light'?'dark':'light')});
+const plugin=new ImageAtlasPlugin(app);window.atlasPlugin=plugin;app.plugin=plugin;await plugin.load();installReviewInteractions(app);installRomusUI(app);installNewTab(app,{createNote:leaf=>newNote(app.preferences.notesFolder||'Notas',leaf),createExcalidraw:leaf=>newExcalidrawDrawing('Excalidraw',leaf)});await app.noteCatalog.refresh();installBoardAppearance(app);installStudyWorkspace(app);installFlashcardSearch(app);app.factories.set('atlas-notes-library',leaf=>new NotesLibrary(leaf));app.media=await new MediaStore(app).init();installMediaUI(app);installOmniSearch(app);app.refreshMediaBoards=mediaId=>{for(const leaf of app.workspace.getLeavesOfType('image-atlas-board'))if(!mediaId||leaf.view.board.nodes.some(node=>node.mediaId===mediaId))leaf.view.render()};app.vault.on('rename',(file,old)=>{for(const item of app.media.items.values()){if(item.notePath===old){app.media.noteOwners.delete(old);item.notePath=file.path;app.media.own(item);app.mediaOwnedPaths.delete(old);app.mediaOwnedPaths.add(file.path);app.media.touch()}if(item.local&&item.source===old){app.media.byKey.delete(item.key);item.source=file.path;item.key='pdf:'+file.path;app.media.byKey.set(item.key,item);app.media.touch()}for(const ref of item.refs)if(ref.boardPath===old){ref.boardPath=file.path;app.media.touch()}}});
 installImages(app);app.openMediaLibrary=openMediaLibrary;app.closeAllNotes=async()=>{await flush();const notes=app.workspace.leaves.filter(leaf=>['markdown','atlas-media-player'].includes(leaf.view?.getViewType()));for(const leaf of notes)await leaf.close();new Notice(notes.length?notes.length+' notas fechadas.':'Nenhuma nota aberta.')};app.commands.push({id:'close-all-notes',name:'Fechar todas as notas',callback:()=>app.closeAllNotes()});
 app.closeAllTabs=()=>{
  if(app.closingTabs)return app.closingTabs;
@@ -260,7 +309,7 @@ app.commands.push({id:'close-all-tabs',name:'Fechar todas as abas',callback:()=>
 app.vault.on('create',renderFiles);app.vault.on('delete',renderFiles);app.vault.on('folder-create',renderFiles);app.vault.on('rename',renderFiles);document.getElementById('file-search').oninput=renderFiles;
 document.addEventListener('keydown',event=>{if(event.defaultPrevented||!(event.ctrlKey||event.metaKey))return;if(event.shiftKey&&!event.altKey&&event.key.toLowerCase()==='f'&&(!modalsOpen()||app.boardSummaryModal||app.plugin.activeReviewPopup?.containerEl.isConnected)){event.preventDefault();app.openFlashcardSearch();return}if(modalsOpen()){if(event.key.toLowerCase()==='p'&&app.boardSummaryModal){event.preventDefault();commandPalette()}else if(event.key.toLowerCase()==='o'&&app.boardSummaryModal&&!event.shiftKey){event.preventDefault();filePalette()}return;}const key=event.key.toLowerCase();if(key==='\\'){event.preventDefault();app.toggleSidebar()}else if(key==='p'){event.preventDefault();commandPalette()}else if(key==='o'){event.preventDefault();if(event.shiftKey)runCommand('search-whiteboards');else filePalette()}else if(key==='s'){event.preventDefault();flush().then(()=>new Notice('Alterações salvas.')).catch(e=>new Notice(e.message))}});
 window.addEventListener('unhandledrejection',event=>{console.error(event.reason);new Notice(event.reason?.message||String(event.reason))});
-native.onClosing(async()=>{try{await flush();rememberWorkspace();plugin.unload();native.readyToClose()}catch(error){new Notice('O aplicativo permaneceu aberto para proteger alterações pendentes: '+error.message)}});
+let closeAttempts=0;native.onClosing(async()=>{closeAttempts++;try{await flush();rememberWorkspace();plugin.unload();native.readyToClose()}catch(error){console.error('Falha ao descarregar antes de fechar:',error);if(closeAttempts>1){native.readyToClose()}else{new Notice('O aplicativo permaneceu aberto para proteger alterações pendentes: '+error.message+' (Clique em fechar novamente para forçar).')}}});
 renderFiles();app.restoringWorkspace=true;try{await restoreWorkspace()}finally{app.restoringWorkspace=false}app.recentNotes.touch(app.workspace.getActiveFile());app.navigation.visit(app.workspace.activeLeaf);renderFiles();showWelcome();
 
 async function createDemo(){

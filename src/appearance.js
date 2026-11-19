@@ -10,6 +10,7 @@ import {BoardNoteContent} from './board-note-content.js';
 import {installBoardMotion} from './board-motion.js';
 import {installBoardFind} from './board-find.js';
 import {installBoardNoteEditor} from './board-note-editor.js';
+import {exportBoardToPdf} from './board-pdf-export.js';
 
 /** Restyle original controls; callbacks, undo, layout and persistence stay in the engine. */
 export function decorateBoard(view) {
@@ -37,7 +38,7 @@ export function decorateBoard(view) {
     panel.addEventListener('click',event=>{if(event.target.closest('button'))details.open=false});
     return details;
   };
-  const addMenu=menu('Adicionar','plus',['Mapa mental','Adicionar nota existente','Imagem','Subwhiteboard','Página','Importar']);
+  const addMenu=menu('Adicionar','plus',['Mapa mental','Adicionar nota existente','Imagem','Subwhiteboard','Desenho Excalidraw','Página','Importar']);
   const create=view.button(addMenu.querySelector('.atlas-tool-menu-panel'),'Nova nota','file-plus',()=>createBoardNote(view));addMenu.querySelector('.atlas-tool-menu-panel').prepend(create);
   const study=controls.get('Estudar todos os flashcards');
   const summary=view.button(toolbar,'Resumo','notebook-pen',()=>openBoardSummary(view));summary.classList.add('atlas-board-summary-button');summary.title='Ler ou editar o resumo deste whiteboard';
@@ -49,7 +50,9 @@ export function decorateBoard(view) {
   const back=controls.get('Voltar ao quadro anterior');if(back){back.classList.add('atlas-icon-button');toolbar.insertBefore(back,title)}
   // Move the real controls once; keep their handlers, labels and engine state.
   const context=toolbar.createDiv({cls:'romus-board-context'});if(back)context.append(back);context.append(title);
-  const actions=toolbar.createDiv({cls:'romus-board-actions'});actions.append(summary);if(study)actions.append(study);if(details)actions.append(details);actions.append(more);
+  const pdfBtn=view.button(toolbar,'Exportar PDF','file-down',()=>exportBoardToPdf(view));pdfBtn.classList.add('atlas-board-pdf-button');pdfBtn.title='Exportar resumos e flashcards deste whiteboard em PDF';
+  const morePanel=more.querySelector('.atlas-tool-menu-panel');if(morePanel){const pdfMenuBtn=view.button(morePanel,'Exportar PDF do quadro','file-down',()=>exportBoardToPdf(view));pdfMenuBtn.title='Exportar resumos e flashcards em um único PDF';}
+  const actions=toolbar.createDiv({cls:'romus-board-actions'});actions.append(summary);if(study)actions.append(study);actions.append(pdfBtn);if(details)actions.append(details);actions.append(more);
   dock.prepend(addMenu);
   const cameraTools=view.contentEl.querySelector('.ia-body').createDiv({cls:'romus-canvas-secondary',attr:{role:'toolbar','aria-label':'Visualização e histórico do quadro'}});
   for(const label of ['Enquadrar','Desfazer','Refazer']){const control=controls.get(label);if(control)cameraTools.append(control)}

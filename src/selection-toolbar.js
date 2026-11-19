@@ -4,6 +4,7 @@ import {openColorPalette,closeColorPalette} from './color-palette.js';
 import {textPaintAttributes,originalTextColor} from './highlight-color.js';
 import {openWikipediaModal} from './wikipedia.js';
 import {patchNotePage} from './note-page-data.js';
+import {openClozeCreationModal,openClozeEditModal} from './cloze-modal.js';
 const safeColor=value=>/^#[a-f\d]{6}$/i.test(value||'')?value:null;
 function paintSelection(editor,attribute,value){editor.chain().focus(undefined,{scrollIntoView:false}).command(({tr,state})=>{const type=state.schema.marks.textPaint,{from,to}=state.selection;state.doc.nodesBetween(from,to,(node,pos)=>{if(!node.isText)return;const previous=node.marks.find(mark=>mark.type===type),attrs={...(previous?.attrs||{}),[attribute]:value},start=Math.max(from,pos),end=Math.min(to,pos+node.nodeSize);if(attribute==='background')attrs.autoForeground=value?true:null;else if(attrs.background)attrs.autoForeground=value?false:true;tr.removeMark(start,end,type);if(attrs.color||attrs.background)tr.addMark(start,end,type.create(attrs))});return true}).run()}
 export const TextPaint=Mark.create({
@@ -27,6 +28,7 @@ export class SelectionToolbar{
   block.onchange=()=>{const value=block.value,chain=this.editor.chain().focus();if(/^h[1-6]$/.test(value))chain.toggleHeading({level:Number(value[1])}).run();else({paragraph:()=>chain.setParagraph().run(),bullet:()=>chain.toggleBulletList().run(),ordered:()=>chain.toggleOrderedList().run(),task:()=>chain.toggleTaskList().run(),quote:()=>chain.toggleBlockquote().run(),code:()=>chain.toggleCodeBlock().run()})[value]?.();block.value='';this.update()};
   this.colorInput('Cor da fonte','color','#75b8ff');this.colorInput('Cor de fundo','background','#d9b84a');
   button('Inserir link','link',()=>this.openLink());
+  button('Cloze · Criar flashcard na nota','eye-off',()=>this.openClozeModal());
   button('Criar ou vincular nota ao lado','file-plus',()=>{const {from,to}=this.editor.state.selection,title=this.editor.state.doc.textBetween(from,to,' ').trim();if(!title)return;this.editor.chain().focus(undefined,{scrollIntoView:false}).setLink({href:'atlas-note:'+encodeURIComponent(title)}).run();this.owner.dirty=true;this.owner.flushToOwner();this.owner.decorateLinks();this.owner.app.openNoteLink(title,this.owner.owner.file?.path||'').catch(error=>{if(this.owner.owner?.status)this.owner.owner.status.textContent=error.message})});
    button('Vincular à Wikipedia','wikipedia',()=>{
     const {from,to}=this.editor.state.selection,term=this.editor.state.doc.textBetween(from,to,' ').trim();
@@ -73,6 +75,81 @@ export class SelectionToolbar{
  openLink(){
   const popup=this.element.createDiv({cls:'atlas-selection-link'}),input=popup.createEl('input',{attr:{placeholder:'https://… ou [[Nome da nota]]','aria-label':'Endereço do link'}});input.value=this.editor.getAttributes('link').href||'';
   const save=popup.createEl('button',{text:'Aplicar'});save.onclick=()=>{let href=input.value.trim();if(/^\[\[.+\]\]$/.test(href))href='atlas-note:'+encodeURIComponent(href.slice(2,-2));if(href)this.editor.chain().focus().setLink({href}).run();else this.editor.chain().focus().unsetLink().run();popup.remove();this.update()};input.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();save.click()}if(event.key==='Escape'){popup.remove();this.editor.commands.focus()}};input.focus();
+ }
+ openClozeModal(){
+  const linkAttr=this.editor.getAttributes('link');
+  const href=linkAttr?.href||'';
+  if(href.startsWith('atlas-cloze:')){
+    let data={};
+    try{data=JSON.parse(decodeURIComponent(href.slice(12)))}catch{}
+    const {from,to}=this.editor.state.selection;
+    const text=this.editor.state.doc.textBetween(from,to,' ').trim()||data.answer||'';
+    const raw=data.raw||(`{{${text}${data.label?'::'+data.label:''}${data.hint?'::'+data.hint:''}}}`);
+    openClozeEditModal(this.owner.app,{
+      raw,
+      cId:data.cId||'',
+      answer:text,
+      label:data.label||'',
+      hint:data.hint||'',
+      notePath:this.owner.owner?.file?.path,
+      onApply:(newMarkup,newAns)=>{
+        const inner=newMarkup.slice(2,-2).trim(),parts=inner.split('::');
+        let newCId='',newAnsText=inner,newLabel='',newHint='';
+        if(parts.length>1){
+          if(/^c\d+$/i.test(parts[0].trim())){
+            newCId=parts[0].trim();newAnsText=parts[1].trim();
+            if(parts.length>=4){newLabel=parts[2].trim();newHint=parts.slice(3).join('::').trim()}
+            else{newHint=parts.slice(2).join('::').trim()}
+          }else{
+            newAnsText=parts[0].trim();
+            if(parts.length>=3){newLabel=parts[1].trim();newHint=parts.slice(2).join('::').trim()}
+            else{newLabel=parts.slice(1).join('::').trim();newHint=''}
+          }
+        }
+        const encoded=encodeURIComponent(JSON.stringify({raw:newMarkup,cId:newCId,answer:newAnsText,label:newLabel,hint:newHint}));
+        const newHref='atlas-cloze:'+encoded;
+        this.editor.chain().focus().insertContentAt({from,to},{type:'text',text:newAnsText,marks:[{type:'link',attrs:{href:newHref}}]}).run();
+        this.owner.dirty=true;
+        this.owner.flushToOwner();
+        this.owner.scheduleLinks();
+      },
+      onRemove:plainText=>{
+        this.editor.chain().focus().insertContentAt({from,to},{type:'text',text:plainText}).run();
+        this.owner.dirty=true;
+        this.owner.flushToOwner();
+      }
+    });
+    return;
+  }
+  const {from,to}=this.editor.state.selection,text=this.editor.state.doc.textBetween(from,to,' ').trim();
+  if(!text)return;
+  openClozeCreationModal(this.owner.app,{
+    text,
+    onApply:markup=>{
+      const m=/^\{\{((?:[^{}]|(?<=\\)[{}])+)\}\}$/.exec(markup.trim());
+      let cId='',answer=text,label='',hint='';
+      if(m){
+        const inner=m[1].trim(),parts=inner.split('::');
+        if(parts.length>1){
+          if(/^c\d+$/i.test(parts[0].trim())){
+            cId=parts[0].trim();answer=parts[1].trim();
+            if(parts.length>=4){label=parts[2].trim();hint=parts.slice(3).join('::').trim()}
+            else{hint=parts.slice(2).join('::').trim()}
+          }else{
+            answer=parts[0].trim();
+            if(parts.length>=3){label=parts[1].trim();hint=parts.slice(2).join('::').trim()}
+            else{label=parts.slice(1).join('::').trim();hint=''}
+          }
+        }
+      }
+      const encoded=encodeURIComponent(JSON.stringify({raw:markup,cId,answer,label,hint}));
+      const newHref='atlas-cloze:'+encoded;
+      this.editor.chain().focus().insertContentAt({from,to},{type:'text',text:answer,marks:[{type:'link',attrs:{href:newHref}}]}).run();
+      this.owner.dirty=true;
+      this.owner.flushToOwner();
+      this.owner.scheduleLinks();
+    }
+  });
  }
  update(){
   if(this.element.contains(document.activeElement)||document.activeElement?.closest('.atlas-common-palette'))return;

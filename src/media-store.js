@@ -42,7 +42,9 @@ export class MediaStore{
  bind(view,node,item,note){if(view&&view.board.nodes.includes(node)&&node.mediaNote!==note.path){node.mediaNote=note.path;node.mediaId=item.id;view.changed(true);view.render()}}
  async metadata(item){if(!['youtube','spotify'].includes(item.type)||item.metadataChecked)return;item.metadataChecked=true;try{const data=await window.atlasNative.call('media:metadata',item.source);if(data?.title&&!item.customTitle){item.title=data.title;item.metadataResolved=true;}if(data?.thumbnail&&!item.thumbnail)item.thumbnail=data.thumbnail;this.touch();this.app.refreshMediaBoards?.(item.id)}catch{}}
  async rename(item,title){
-  title=title.trim();if(!title)return;await this.app.flushAll();const note=this.app.vault.getFileByPath(item.notePath),oldTitle=item.title,oldBase=note?.basename;
+  title=title.trim();if(!title)return;
+  if(item.type==='image'&&item.local&&this.app.images?.rename)return this.app.images.rename(item,title);
+  await this.app.flushAll();const note=this.app.vault.getFileByPath(item.notePath),oldTitle=item.title,oldBase=note?.basename;
   if(note){const folder=note.path.split('/').slice(0,-1).join('/'),target=folder+'/'+safeName(title)+'.md',existing=this.app.vault.getFileByPath(target),path=existing&&existing!==note?this.app.plugin.unique(target):target;if(path!==note.path)await this.app.fileManager.renameFile(note,path);
    await this.app.vault.process(note,text=>{const body=propertyDocument(text).body,prefix=text.slice(0,text.length-body.length),updated=body.replace(/^# ([^\r\n]+)$/m,(line,name)=>[oldTitle,oldBase,'Vídeo do YouTube','Áudio do Spotify'].includes(name.trim())?'# '+title:line);return prefix+updated});
   }

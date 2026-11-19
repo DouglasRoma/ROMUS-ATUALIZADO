@@ -24,22 +24,99 @@ const fold=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCas
 // recreate anchor elements without a content update or decoration frame.
 const NoteLink=Link.extend({renderHTML(props){
  const spec=this.parent(props),attrs=spec[1];
- const wiki=parseWikipediaUrl(attrs?.href||'');
- if(attrs?.href?.startsWith('atlas-note:')||wiki){
-  attrs.class=[attrs.class,'internal-link'].filter(Boolean).join(' ');
-  try{attrs['data-href']=wiki?wiki.title:decodeURIComponent(attrs.href.slice(11))}
-  catch{attrs['data-href']=wiki?wiki.title:attrs.href.slice(11)}
+ const href=attrs?.href||'';
+ if(href.startsWith('atlas-cloze:')){
+  let data={};
+  try{data=JSON.parse(decodeURIComponent(href.slice(12)))}catch{}
+  const hasTag=Boolean(data.label||data.hint);
+  const tag=data.label||data.hint||'';
+  attrs.class=[attrs.class,'romus-cloze-editor-pill'].filter(Boolean).join(' ');
+  attrs['data-cloze']='true';
+  attrs['data-has-tag']=hasTag?'true':'false';
+  attrs['data-cloze-tag']=tag;
+  attrs['data-cloze-id']=data.cId||'';
+  attrs['data-cloze-label']=data.label||'';
+  attrs['data-cloze-hint']=data.hint||'';
+  attrs.title=hasTag?`Cloze · ${tag} (Clique para editar)`:'Cloze (Clique para editar)';
+ }else{
+  const wiki=parseWikipediaUrl(href);
+  if(href.startsWith('atlas-note:')||wiki){
+   attrs.class=[attrs.class,'internal-link'].filter(Boolean).join(' ');
+   try{attrs['data-href']=wiki?wiki.title:decodeURIComponent(href.slice(11))}
+   catch{attrs['data-href']=wiki?wiki.title:attrs.href.slice(11)}
+  }
  }
  return spec;
 }});
 export class FormattedEditor{
  constructor(owner,host){
   this.owner=owner;this.app=owner.app;this.host=host;this.managed=[];
-  this.editor=new Editor({element:host,extensions:[StarterKit.configure({link:false}),NoteLink.configure({openOnClick:false,protocols:['atlas-note']}),Markdown,noteImage(owner),TaskList,TaskItem.configure({nested:true}),TableKit,TextPaint],content:'',contentType:'markdown',
+  this.editor=new Editor({element:host,extensions:[StarterKit.configure({link:false}),NoteLink.configure({openOnClick:false,protocols:['atlas-note','atlas-cloze']}),Markdown,noteImage(owner),TaskList,TaskItem.configure({nested:true}),TableKit,TextPaint],content:'',contentType:'markdown',
    editorProps:{attributes:{'aria-label':'Texto formatado da nota',role:'textbox','aria-multiline':'true',spellcheck:'true'},handleKeyDown:(_,event)=>this.onKey(event)},
    onUpdate:()=>{if(this.loading||this.completeWikiLink())return;this.dirty=true;owner.status.textContent='Salvando…';clearTimeout(this.serializeTimer);this.serializeTimer=setTimeout(()=>this.flushToOwner(),280);this.scheduleLinks();this.updateSuggestions();owner.slash?.update();this.bubble?.schedule()},onSelectionUpdate:()=>{this.updateSuggestions();owner.slash?.update();this.bubble?.schedule()},onFocus:()=>this.bubble?.schedule(),onBlur:()=>requestAnimationFrame(()=>{if(!this.editor.isDestroyed)this.bubble?.schedule()})});
   this.bubble=new SelectionToolbar(this);
   host.addEventListener('click',this.click=async event=>{
+   const clozeLink=event.target.closest('a[href^="atlas-cloze:"]');
+   if(clozeLink){
+    if(event.ctrlKey||event.metaKey){
+     const answer=clozeLink.textContent.trim();
+     const file=this.app.metadataCache.getFirstLinkpathDest(answer,owner.file?.path);
+     if(file){
+      event.preventDefault();
+      this.app.openNoteLink(file.path,owner.file?.path,event);
+      return;
+     }
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    let data={};
+    try{data=JSON.parse(decodeURIComponent(clozeLink.getAttribute('href').slice(12)))}catch{}
+    const answer=clozeLink.textContent.trim();
+    const raw=data.raw||`{{${answer}${data.label?'::'+data.label:''}${data.hint?'::'+data.hint:''}}}`;
+    const {openClozeEditModal}=await import('./cloze-modal.js');
+    openClozeEditModal(this.app,{
+     raw,
+     cId:data.cId||'',
+     answer,
+     label:data.label||'',
+     hint:data.hint||'',
+     notePath:owner.file?.path,
+     onApply:(newMarkup,newAnswer)=>{
+      const pos=this.editor.view.posAtDOM(clozeLink,0);
+      const from=pos,to=pos+clozeLink.textContent.length;
+      const inner=newMarkup.slice(2,-2).trim();
+      const parts=inner.split('::');
+      let newCId='',newAns=inner,newLabel='',newHint='';
+      if(parts.length>1){
+       if(/^c\d+$/i.test(parts[0].trim())){
+        newCId=parts[0].trim();newAns=parts[1].trim();
+        if(parts.length>=4){newLabel=parts[2].trim();newHint=parts.slice(3).join('::').trim()}
+        else{newHint=parts.slice(2).join('::').trim()}
+       }else{
+        newAns=parts[0].trim();
+        if(parts.length>=3){newLabel=parts[1].trim();newHint=parts.slice(2).join('::').trim()}
+        else{newHint=parts.slice(1).join('::').trim()}
+       }
+      }
+      const encoded=encodeURIComponent(JSON.stringify({raw:newMarkup,cId:newCId,answer:newAns,label:newLabel,hint:newHint}));
+      const href='atlas-cloze:'+encoded;
+      this.editor.chain().focus().insertContentAt({from,to},{type:'text',text:newAns,marks:[{type:'link',attrs:{href}}]}).run();
+      this.dirty=true;
+      owner.status.textContent='Salvando…';
+      this.flushToOwner();
+      this.scheduleLinks();
+     },
+     onRemove:plainText=>{
+      const pos=this.editor.view.posAtDOM(clozeLink,0);
+      const from=pos,to=pos+clozeLink.textContent.length;
+      this.editor.chain().focus().insertContentAt({from,to},{type:'text',text:plainText}).run();
+      this.dirty=true;
+      owner.status.textContent='Salvando…';
+      this.flushToOwner();
+     }
+    });
+    return;
+   }
    const link=event.target.closest('a');
    if(!link)return;
    const href=link.getAttribute('href');
@@ -70,18 +147,35 @@ export class FormattedEditor{
   this.loadedBody=body;this.loadCount=(this.loadCount||0)+1;
   clearTimeout(this.serializeTimer);this.dirty=false;
   this.closeSuggestions();this.loading=true;const {text,managed}=this.owner.plainDocument?{text:body,managed:[]}:editableDocument(body);this.managed=managed;
-  const markdown=text.replace(/!\[([^\]]*)\]\((?:<([^>]+)>|([^\s)]+))(\s+"(?:\\.|[^"])*")?\)/g,(raw,alt,angle,path,title)=>{const file=this.app.metadataCache.getFirstLinkpathDest(angle||path,this.owner.file.path);return file?`![${alt}](${this.app.vault.getResourcePath(file)}${title||''})`:raw}).replace(/!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g,(_,target)=>{const file=this.app.metadataCache.getFirstLinkpathDest(target,this.owner.file.path);return file?`![](${this.app.vault.getResourcePath(file)})`:_}).replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,(_,target,label)=>`[${noteLinkLabel(target,label).replace(/[\[\]]/g,'')}](atlas-note:${encodeURIComponent(target)})`);
+  const markdown=text.replace(/!\[([^\]]*)\]\((?:<([^>]+)>|([^\s)]+))(\s+"(?:\\.|[^"])*")?\)/g,(raw,alt,angle,path,title)=>{const file=this.app.metadataCache.getFirstLinkpathDest(angle||path,this.owner.file.path);return file?`![${alt}](${this.app.vault.getResourcePath(file)}${title||''})`:raw}).replace(/!\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/g,(_,target,size)=>{const file=this.app.metadataCache.getFirstLinkpathDest(target,this.owner.file.path);const width=size&&/^\d+/.test(size.trim())?size.trim().match(/^\d+/)[0]:'';const alt=width||(size?size.trim():'');return file?`![${alt}](${this.app.vault.getResourcePath(file)})`:_}).replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,(_,target,label)=>`[${noteLinkLabel(target,label).replace(/[\[\]]/g,'')}](atlas-note:${encodeURIComponent(target)})`).replace(/\{\{((?:[^{}]|(?<=\\)[{}])+)\}\}/g,(raw,inner)=>{const parts=inner.split('::');let cId='',answer=inner,label='',hint='';if(parts.length>1){if(/^c\d+$/i.test(parts[0].trim())){cId=parts[0].trim();answer=parts[1].trim();if(parts.length>=4){label=parts[2].trim();hint=parts.slice(3).join('::').trim()}else{hint=parts.slice(2).join('::').trim()}}else{answer=parts[0].trim();if(parts.length>=3){label=parts[1].trim();hint=parts.slice(2).join('::').trim()}else{hint=parts.slice(1).join('::').trim()}}}const encoded=encodeURIComponent(JSON.stringify({raw,cId,answer,label,hint}));return `[${answer}](atlas-cloze:${encoded})`});
   try{this.editor.chain().setMeta('addToHistory',false).setContent(markdown,{contentType:'markdown',emitUpdate:false}).run();this.resetHistory();this.decorateLinks()}finally{this.loading=false}
  }
  resetHistory(){const state=this.editor.state;this.editor.view.updateState(EditorState.create({schema:state.schema,doc:state.doc,selection:state.selection,plugins:state.plugins}))}
  serialize(){
   let text=this.editor.getMarkdown().replace(/\[([^\]]+)\]\(atlas-note:([^\s)]+)\)/g,(_,label,path)=>{const target=decodeURIComponent(path),base=noteLinkLabel(target);return`[[${target}${label===base?'':'|'+label}]]`});
-  text=text.replace(/!\[([^\]]*)\]\(atlas-data:\/\/library\/([^\s)]+)(\s+"(?:\\.|[^"])*")?\)/g,(_,alt,path,title)=>title?`![${alt}](<${relativeImage(this.owner.file.path,decodeURIComponent(path))}>${title})`:`![[${decodeURIComponent(path)}]]`);
+  text=text.replace(/!\[([^\]]*)\]\(atlas-data:\/\/library\/([^\s)]+)(\s+"(?:\\.|[^"])*")?\)/g,(_,alt,path,title)=>{const decoded=decodeURIComponent(path);const width=alt&&/^\d+/.test(alt.trim())?alt.trim().match(/^\d+/)[0]:'';const sizePart=width?`|${width}`:(alt&&!/^\s*$/.test(alt)?`|${alt}`:'');return title?`![${alt}](<${relativeImage(this.owner.file.path,decoded)}>${title})`:`![[${decoded}${sizePart}]]`;});
+   text=text.replace(/\[([^\]]+)\]\(atlas-cloze:([^\s)]+)\)/g,(_,val,encoded)=>{let data={};try{data=JSON.parse(decodeURIComponent(encoded))}catch{}if(data.cId){if(data.label&&data.hint)return `{{${data.cId}::${val}::${data.label}::${data.hint}}}`;if(data.label)return `{{${data.cId}::${val}::${data.label}}}`;if(data.hint)return `{{${data.cId}::${val}::${data.hint}}}`;return `{{${data.cId}::${val}}}`}else{if(data.label&&data.hint)return `{{${val}::${data.label}::${data.hint}}}`;if(data.label)return `{{${val}::${data.label}}}`;if(data.hint)return `{{${val}::${data.hint}}}`;return `{{${val}}}`}});
   return this.owner.plainDocument?text:mergeNoteContent(text,this.managed);
  }
  flushToOwner(notify=true){clearTimeout(this.serializeTimer);if(!this.dirty||this.editor.isDestroyed)return;this.owner.input.value=this.serialize();this.loadedBody=this.owner.input.value;this.dirty=false;if(notify)this.owner.queueSave()}
  scheduleLinks(){if(!this.linkFrame)this.linkFrame=requestAnimationFrame(()=>{this.linkFrame=null;if(!this.editor.isDestroyed)this.decorateLinks()})}
- decorateLinks(){for(const anchor of this.host.querySelectorAll('a[href^="atlas-note:"]:not([data-href])')){anchor.classList.add('internal-link');anchor.dataset.href=decodeURIComponent(anchor.getAttribute('href').slice(11))}}
+ decorateLinks(){
+  for(const anchor of this.host.querySelectorAll('a[href^="atlas-note:"]:not([data-href])')){anchor.classList.add('internal-link');anchor.dataset.href=decodeURIComponent(anchor.getAttribute('href').slice(11))}
+  for(const anchor of this.host.querySelectorAll('a[href^="atlas-cloze:"]')){
+   let data={};
+   try{data=JSON.parse(decodeURIComponent(anchor.getAttribute('href').slice(12)))}catch{}
+   const hasTag=Boolean(data.label||data.hint);
+   const tag=data.label||data.hint||'';
+   anchor.classList.add('romus-cloze-editor-pill');
+   anchor.dataset.cloze='true';
+   anchor.dataset.hasTag=hasTag?'true':'false';
+   anchor.dataset.clozeTag=tag;
+   anchor.dataset.clozeId=data.cId||'';
+   anchor.dataset.clozeLabel=data.label||'';
+   anchor.dataset.clozeHint=data.hint||'';
+   anchor.title=hasTag?`Cloze · ${tag} (Clique para editar)`:'Cloze (Clique para editar)';
+  }
+ }
  completeWikiLink(){
   const {state}=this.editor,{selection,schema}=state;if(!selection.empty||selection.$from.parent.type.spec.code||selection.$from.marks().some(mark=>mark.type.name==='code'))return false;
   const before=selection.$from.parent.textBetween(0,selection.$from.parentOffset),match=before.match(/(^|[^!])\[\[([^\[\]\n]+)\]\]$/);if(!match)return false;

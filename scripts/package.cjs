@@ -4,6 +4,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
  const run=args=>{const result=spawnSync(process.execPath,args,{cwd:root,stdio:'inherit',windowsHide:true});if(result.status!==0)throw Error('A geração do pacote falhou; o instalador anterior não foi substituído.')};
  run(['scripts/build.cjs']);
  const stage=path.join(process.env.LOCALAPPDATA||os.tmpdir(),'ImageAtlasBuild',pkg.version);
+ await fs.rm(stage,{recursive:true,force:true});
  const electronDist=path.join(root,'node_modules/electron/dist');
  // Reuse the installed runtime instead of downloading another large ZIP.
  const localElectron=await fs.stat(path.join(electronDist,'electron.exe')).then(()=>true,()=>false);

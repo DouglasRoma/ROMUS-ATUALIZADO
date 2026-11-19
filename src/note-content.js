@@ -1,3 +1,36 @@
+export const NOTE_CARDS_START = '<!-- image-atlas-flashcards:start -->';
+export const NOTE_CARDS_END = '<!-- image-atlas-flashcards:end -->';
+
+export function noteFlashcardBlock(text) {
+  const start = text.indexOf(NOTE_CARDS_START), end = text.indexOf(NOTE_CARDS_END);
+  if (start < 0 && end < 0) return { source: '', original: null };
+  if (start < 0 || end < start || text.indexOf(NOTE_CARDS_START, start + 1) >= 0 || text.indexOf(NOTE_CARDS_END, end + 1) >= 0) {
+    throw new Error('O bloco de flashcards da nota está incompleto ou duplicado. Corrija os marcadores antes de salvar.');
+  }
+  return { source: text.slice(start + NOTE_CARDS_START.length, end).trim(), original: text.slice(start, end + NOTE_CARDS_END.length) };
+}
+
+export function writeNoteFlashcardBlock(text, original, source) {
+  if (/<!--\s*image-atlas-(?:flashcards|visual):/.test(source)) throw new Error('Cole apenas os cartões, sem os marcadores internos do ROMUS.');
+  const current = noteFlashcardBlock(text);
+  if (current.original !== original) throw new Error('Os flashcards foram alterados em outra janela. Reabra o editor para carregar a versão atual. Seu texto continua neste editor.');
+  if (original === null && !source.trim()) return text;
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const block = [NOTE_CARDS_START, source.trim().replace(/\r?\n/g, eol), NOTE_CARDS_END].join(eol);
+  return current.original === null ? text + (text.endsWith(eol + eol) ? '' : text.endsWith(eol) ? eol : eol + eol) + '## Flashcards' + eol + eol + block + eol : text.replace(current.original, () => block);
+}
+
+export function normalizeFlashcardsToBullets(source) {
+  if (!source) return '';
+  return source.split(/\r?\n/).map(line => {
+    const trimmed = line.trim();
+    if (!trimmed) return '';
+    if (/^(?: {2,}|\t)/.test(line)) return line;
+    if (/^[-*+]\s+/.test(trimmed)) return line;
+    return '- ' + trimmed;
+  }).join('\n');
+}
+
 // Study blocks stay in the Markdown file, outside the ordinary summary editor.
 export function splitNoteContent(body){
  const ranges=[];const pattern=/(?:^#{1,6}[ \t]+Flashcards[^\S\r\n]*\r?\n\s*)?<!-- image-atlas-(visual|flashcards|caption):start -->[\s\S]*?<!-- image-atlas-\1:end -->|<!-- image-atlas-fsrs-deck:[^>]*-->|^#{1,6}[ \t]+Flashcards[ \t]*\r?$(?:\n)?/gm;

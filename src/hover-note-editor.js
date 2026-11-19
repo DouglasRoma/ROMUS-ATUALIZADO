@@ -74,6 +74,8 @@ export function installHoverNoteEditor(app){
   });record.pin.setAttribute('aria-pressed','false');
   record.closeButton=button(record.tools,'Fechar prévia','x',()=>closeRecord(record,{restoreFocus:true}));
   const tip=preview.querySelector('.ia-review-note-preview-tip')||preview.createDiv({cls:'ia-muted ia-review-note-preview-tip'});tip.textContent+=(tip.textContent?' ':'')+'Clique no texto para editar aqui.';
+  tip.style.cursor='pointer';tip.setAttribute('role','button');tip.setAttribute('title','Clique para editar esta nota');
+  tip.onclick=event=>{event.preventDefault();event.stopImmediatePropagation();retain(record);app.editPreviewNote(file,{},preview,detach).catch(error=>new Notice(error.message))};
   preview.addEventListener('pointerenter',()=>retain(record));
   preview.addEventListener('click',event=>{
    const link=event.target.closest('a.internal-link');
@@ -81,12 +83,18 @@ export function installHoverNoteEditor(app){
     event.preventDefault();event.stopImmediatePropagation();retain(record);
     app.workspace.trigger('hover-link',{event,targetEl:link,linktext:link.dataset.href,sourcePath:record.file.path});return;
    }
-   if(record.editor||event.target.closest('a,button,img,input,textarea,.atlas-preview-heading,.ia-review-note-preview-tip,.romus-board-note-tabs,.romus-preview-tabs,.romus-note-hub,.romus-wiki-view'))return;if(preview.dataset.previewTab&&preview.dataset.previewTab!=='summary')return;
-   if(!window.getSelection()?.isCollapsed)return;
+   if(event.target.closest('.ia-review-note-preview-tip')){event.preventDefault();event.stopImmediatePropagation();retain(record);app.editPreviewNote(file,{},preview,detach).catch(error=>new Notice(error.message));return}
+   if(record.editor||event.target.closest('a,button,img,input,textarea,.atlas-preview-heading,.romus-board-note-tabs,.romus-preview-tabs,.romus-note-hub,.romus-wiki-view'))return;if(preview.dataset.previewTab&&preview.dataset.previewTab!=='summary')return;
+   const sel=window.getSelection();if(sel&&!sel.isCollapsed&&sel.toString().trim().length>1&&!event.target.closest('.ia-review-note-preview-body'))return;
    event.preventDefault();event.stopImmediatePropagation();
    const block=event.target.closest('p,li,h1,h2,h3,h4,h5,h6,pre'),location={text:block?.textContent||'',offset:0},point=document.caretPositionFromPoint?.(event.clientX,event.clientY);
    if(block&&point&&block.contains(point.offsetNode)){const range=document.createRange();range.selectNodeContents(block);range.setEnd(point.offsetNode,point.offset);location.offset=range.toString().length}
    app.editPreviewNote(file,location,preview,detach).catch(error=>new Notice(error.message));
+  },true);
+  preview.addEventListener('dblclick',event=>{
+   if(record.editor||event.target.closest('a,button,input,textarea,.atlas-preview-heading'))return;
+   event.preventDefault();event.stopImmediatePropagation();retain(record);
+   app.editPreviewNote(file,{},preview,detach).catch(error=>new Notice(error.message));
   },true);
   // The persistent heading doubles as a lightweight drag handle.
   title.addEventListener('pointerdown',event=>{

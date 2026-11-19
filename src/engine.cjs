@@ -1,7 +1,8 @@
 /* Image Atlas: vault-local image boards. TextFileView owns board persistence; Markdown notes
  * remain native files. Images use normalized pins; explicitly opened websites use DOM anchors.
  * Web cards retain their guests across board updates. Scene movement updates geometry once per frame. */
-const { Plugin, TextFileView, Modal, SuggestModal, Menu, Notice, MarkdownRenderer, Component, ItemView, Platform, normalizePath, setIcon, parseYaml } = require('obsidian');
+let _obsidian; try { _obsidian = require('obsidian'); } catch (_) { _obsidian = {}; }
+const { Plugin = class {}, TextFileView = class {}, Modal = class {}, SuggestModal = class {}, Menu = class {}, Notice = class {}, MarkdownRenderer = {}, Component = class {}, ItemView = class {}, Platform = {}, normalizePath = p => String(p||''), setIcon = () => {}, parseYaml = () => ({}) } = _obsidian;
 const VIEW = 'image-atlas-board';
 const ROOT = 'Image Atlas';
 const COLORS = ['#a78bfa', '#38bdf8', '#34d399', '#fbbf24', '#fb7185'];
@@ -2178,36 +2179,218 @@ function writeNoteFlashcardBlock(text, original, source) {
   const block = [NOTE_CARDS_START, source.trim().replace(/\r?\n/g, eol), NOTE_CARDS_END].join(eol);
   return current.original === null ? text + (text.endsWith(eol + eol) ? '' : text.endsWith(eol) ? eol : eol + eol) + '## Flashcards' + eol + eol + block + eol : text.replace(current.original, () => block);
 }
-/** One card per line; indented continuation lines support lists and multiline Markdown. */
+function findFlashcardSeparator(line) {
+  let ticks = 0, inCloze = 0, inWiki = 0;
+  for (let j = 0; j < line.length; j++) {
+    if (line[j] === '\\') { j++; continue; }
+    if (line[j] === '`') {
+      let count = 1; while (line[j + count] === '`') count++;
+      ticks = ticks === count ? 0 : (ticks || count);
+      j += count - 1; continue;
+    }
+    if (ticks) continue;
+    if (line.slice(j, j + 2) === '{{') { inCloze++; j++; continue; }
+    if (line.slice(j, j + 2) === '}}' && inCloze) { inCloze--; j++; continue; }
+    if (line.slice(j, j + 2) === '[[') { inWiki++; j++; continue; }
+    if (line.slice(j, j + 2) === ']]' && inWiki) { inWiki--; j++; continue; }
+    if (inCloze || inWiki) continue;
+
+    // Bidirectional
+    if (line.slice(j, j + 4) === '<<>>') return { pos: j, len: 4, token: '<<>>', bidi: true };
+    if (line.slice(j, j + 3) === '<>>') return { pos: j, len: 3, token: '<>>', bidi: true };
+    if (line.slice(j, j + 3) === '<=>') return { pos: j, len: 3, token: '<=>', bidi: true };
+    if (line.slice(j, j + 3) === '<->') return { pos: j, len: 3, token: '<->', bidi: true };
+    if (line.slice(j, j + 3) === ':::') {
+      if (line[j - 1] !== ':' && line[j + 3] !== ':') return { pos: j, len: 3, token: ':::', bidi: true };
+    }
+    // Concept ::
+    if (line.slice(j, j + 2) === '::') {
+      if (line[j - 1] !== ':' && line[j + 2] !== ':' && line[j - 1] !== '/' && line[j + 2] !== '/') {
+        return { pos: j, len: 2, token: '::', cardType: 'concept' };
+      }
+    }
+    // Basic >>
+    if (line.slice(j, j + 2) === '>>') {
+      if (line[j - 1] !== '>' && line[j - 1] !== '<' && line[j + 2] !== '>') return { pos: j, len: 2, token: '>>', cardType: 'basic' };
+    }
+    // Arrows ==> or --> or ->
+    if (line.slice(j, j + 3) === '==>') return { pos: j, len: 3, token: '==>', cardType: 'basic' };
+    if (line.slice(j, j + 3) === '-->') return { pos: j, len: 3, token: '-->', cardType: 'basic' };
+    if (line.slice(j, j + 2) === '->' && line[j - 1] !== '<') return { pos: j, len: 2, token: '->', cardType: 'basic' };
+    // Descriptor ;;
+    if (line.slice(j, j + 2) === ';;') {
+      if (line[j - 1] !== ';' && line[j + 2] !== ';') return { pos: j, len: 2, token: ';;', cardType: 'descriptor' };
+    }
+    // Equality ==
+    if (line.slice(j, j + 2) === '==') {
+      if (line[j - 1] !== '=' && line[j + 2] !== '=' && line[j + 2] !== '>' && line[j - 1] !== '<') {
+        return { pos: j, len: 2, token: '==', cardType: 'basic' };
+      }
+    }
+  }
+  return null;
+}
+
+function parseClozes(text) {
+  const matches = [...text.matchAll(/\{\{((?:[^{}]|(?<=\\)[{}])+)\}\}/g)];
+  if (!matches.length) return null;
+  return matches.map((m, idx) => {
+    let raw = m[1].trim(), label = '', hint = '', answer = raw, clozeNumber = idx + 1;
+    const parts = raw.split('::');
+    if (parts.length > 1) {
+      if (/^c(\d+)$/i.test(parts[0].trim())) {
+        clozeNumber = parseInt(RegExp.$1, 10);
+        answer = parts[1].trim();
+        if (parts.length >= 4) {
+          label = parts[2].trim();
+          hint = parts.slice(3).join('::').trim();
+        } else if (parts.length === 3) {
+          label = parts[2].trim();
+        } else {
+          hint = parts.slice(2).join('::').trim();
+        }
+      } else {
+        answer = parts[0].trim();
+        if (parts.length >= 3) {
+          label = parts[1].trim();
+          hint = parts.slice(2).join('::').trim();
+        } else {
+          label = parts.slice(1).join('::').trim();
+        }
+      }
+    }
+    return { full: m[0], index: m.index, answer, label, hint, clozeIndex: idx, clozeNumber };
+  });
+}
+
+/** One card per line (RemNote formats with bullets); indented continuation lines support lists and multiline Markdown. */
 function parseNoteFlashcards(text, path = '', strict = false) {
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/), cards = [], errors = [];
   let frontmatter = lines[0] === '---', visual = false, comment = false, fence = null, previous = null;
+  const hierarchyStack = [];
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i], trimmed = line.trim();
     if (frontmatter) { if (i > 0 && trimmed === '---') frontmatter = false; continue; }
-    if (trimmed === '<!-- image-atlas-visual:start -->') { visual = true; previous = null; continue; }
-    if (visual) { if (trimmed === '<!-- image-atlas-visual:end -->') visual = false; continue; }
-    if (trimmed === NOTE_CARDS_START || trimmed === NOTE_CARDS_END) { previous = null; continue; }
-    if (previous && /^(?: {2}|\t)/.test(line)) { previous.answer += '\n' + line.replace(/^(?: {2}|\t)/, ''); continue; }
+    if (trimmed === '<!-- image-atlas-visual:start -->' || trimmed === '<!-- image-atlas-visual:end -->') { visual = trimmed.includes('start'); previous = null; continue; }
+    if (visual || trimmed === NOTE_CARDS_START || trimmed === NOTE_CARDS_END) { previous = null; continue; }
     if (comment) { if (line.includes('-->')) comment = false; continue; }
     if (/^\s*<!--/.test(line)) { comment = !line.includes('-->'); previous = null; continue; }
+
     const fenced = line.match(/^ {0,3}(`{3,}|~{3,})/);
     if (fence) { if (fenced && fenced[1][0] === fence[0] && fenced[1].length >= fence.length && /^ {0,3}(?:`+|~+)\s*$/.test(line)) fence = null; continue; }
     if (fenced) { fence = fenced[1]; previous = null; continue; }
     if (!trimmed || /^#{1,6}\s/.test(trimmed)) { previous = null; continue; }
-    const separators = []; let ticks = 0;
-    for (let j = 0; j < line.length; j++) {
-      if (line[j] === '\\') { j++; continue; }
-      if (line[j] === '`') { let count = 1; while (line[j + count] === '`') count++; ticks = ticks === count ? 0 : ticks || count; j += count - 1; continue; }
-      if (!ticks && line.slice(j, j + 2) === '==' && line[j - 1] !== '=' && line[j + 2] !== '=') { separators.push(j); j++; }
+
+    const sep = findFlashcardSeparator(line);
+    const promptLine = line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim();
+    const clozes = parseClozes(promptLine);
+    const isCard = Boolean(sep || (clozes && clozes.length));
+
+    // Continuation of multiline answer ONLY if line is NOT a flashcard itself
+    if (previous && !isCard && /^(?: {2}|\t)/.test(line)) {
+      const cont = line.replace(/^(?: {2}|\t)/, '');
+      if (Array.isArray(previous)) {
+        for (const p of previous) {
+          if (p.direction === 'reverse') p.question = (p.question ? p.question + '\n' : '') + cont;
+          else p.answer = (p.answer ? p.answer + '\n' : '') + cont;
+        }
+      } else {
+        previous.answer = (previous.answer ? previous.answer + '\n' : '') + cont;
+      }
+      continue;
     }
-    if (separators.length !== 1) { if (strict) errors.push(i + 1); previous = null; continue; }
-    const position = separators[0], question = line.slice(0, position).replace(/^\s*[-*+]\s+/, '').trim(), answer = line.slice(position + 2).trim();
-    if (!question || !answer) { if (strict) errors.push(i + 1); previous = null; continue; }
-    previous = { id: `${path}:line:${i + 1}`, question, answer, order: cards.length + 1, sourcePath: path }; cards.push(previous);
+
+    // Indentation tracking for RemNote hierarchical context
+    const indentMatch = line.match(/^(\s*)/);
+    const indent = indentMatch ? indentMatch[1].replace(/\t/g, '  ').length : 0;
+
+    while (hierarchyStack.length && hierarchyStack[hierarchyStack.length - 1].indent >= indent) {
+      hierarchyStack.pop();
+    }
+
+    const parentContext = hierarchyStack.map(h => h.prompt);
+    const parentPrompt = parentContext[parentContext.length - 1] || '';
+    const contextBreadcrumb = parentContext.join(' > ');
+
+    if (sep) {
+      const question = line.slice(0, sep.pos).replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '').trim();
+      const answer = line.slice(sep.pos + sep.len).trim();
+      if (!question) { if (strict) errors.push(i + 1); previous = null; continue; }
+      if (sep.bidi) {
+        if (!answer && strict) { errors.push(i + 1); previous = null; continue; }
+        const cardFwd = { id: `${path}:line:${i + 1}`, question, answer, format: sep.token, cardType: 'two-way', direction: 'forward', order: cards.length + 1, sourcePath: path, parentPrompt, contextBreadcrumb, context: parentContext };
+        const cardRev = { id: `${path}:line:${i + 1}:rev`, question: answer, answer: question, format: sep.token, cardType: 'two-way', direction: 'reverse', order: cards.length + 2, sourcePath: path, parentPrompt, contextBreadcrumb, context: parentContext };
+        previous = [cardFwd, cardRev];
+        cards.push(cardFwd, cardRev);
+      } else {
+        const card = { id: `${path}:line:${i + 1}`, question, answer, format: sep.token, cardType: sep.cardType || 'basic', order: cards.length + 1, sourcePath: path, parentPrompt, contextBreadcrumb, context: parentContext };
+        previous = card;
+        cards.push(card);
+      }
+      hierarchyStack.push({ indent, prompt: question, answer });
+      continue;
+    }
+
+    if (clozes && clozes.length) {
+      const lineCards = [];
+      for (const cl of clozes) {
+        let promptBadge = '';
+        if (cl.label && cl.hint) promptBadge = `[${cl.label}: ${cl.hint}]`;
+        else if (cl.label) promptBadge = `[${cl.label}]`;
+        else if (cl.hint) promptBadge = `[${cl.hint}]`;
+        else promptBadge = '[...]';
+        let q = promptLine.replace(cl.full, promptBadge);
+        q = q.replace(/\{\{((?:[^{}]|(?<=\\)[{}])+)\}\}/g, (_, inner) => {
+          const parts = inner.split('::');
+          return /^c\d+$/i.test(parts[0].trim()) ? (parts[1] || '').trim() : (parts[0] || '').trim();
+        });
+        const ans = cl.answer;
+        const card = {
+          id: `${path}:line:${i + 1}${clozes.length > 1 ? `:c${cl.clozeIndex + 1}` : ''}`,
+          question: q,
+          answer: ans,
+          label: cl.label || '',
+          hint: cl.hint || '',
+          clozeText: cl.answer,
+          clozeFull: cl.full,
+          raw: cl.full,
+          clozeNumber: cl.clozeNumber,
+          isCloze: true,
+          sourceLine: i + 1,
+          rawLine: line,
+          format: '{{}}',
+          cardType: 'cloze',
+          order: cards.length + 1,
+          sourcePath: path,
+          parentPrompt,
+          contextBreadcrumb,
+          context: parentContext
+        };
+        cards.push(card);
+        lineCards.push(card);
+      }
+      previous = lineCards.length === 1 ? lineCards[0] : lineCards;
+      hierarchyStack.push({ indent, prompt: promptLine, answer: '' });
+      continue;
+    }
+
+    const bulletMatch = line.match(/^(\s*)(?:[-*+]|\d+[.)])\s+(.+)$/);
+    if (bulletMatch) {
+      const bText = bulletMatch[2].trim();
+      if (bText) {
+        hierarchyStack.push({ indent, prompt: bText, answer: '' });
+      }
+    }
+
+    if (strict) errors.push(i + 1);
+    previous = null;
   }
-  for (const card of cards) card.answer = card.answer.trimEnd();
-  return { cards, errors };
+  for (const card of cards) {
+    card.answer = (card.answer || '').trim();
+    card.question = (card.question || '').trim();
+  }
+  return { cards: cards.filter(c => c.question && c.answer), errors };
 }
 function noteFlashcardPath(node) {
   const path = node.mediaNote || node.visualNote || (['note', 'mind'].includes(node.type) ? node.path : '');
@@ -2259,15 +2442,25 @@ function numberedFlashcardRows(source) {
   for (const line of source.split(/\r?\n/)) {
     if (/^(?: {2}|\t)/.test(line) && rows.length) { rows[rows.length - 1].answer += '\n' + line.replace(/^(?: {2}|\t)/, ''); continue; }
     if (!line.trim()) continue;
-    const clean = line.replace(/^\s*\d+[.)]\s+/, ''), parsed = parseNoteFlashcards(clean).cards;
-    rows.push(parsed.length === 1 ? { question: parsed[0].question, answer: parsed[0].answer } : { question: line, answer: '', incomplete: true });
+    const clean = line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, ''), parsed = parseNoteFlashcards(clean).cards;
+    rows.push(parsed.length >= 1 ? { question: parsed[0].question, answer: parsed[0].answer, format: parsed[0].format || '==' } : { question: clean || line, answer: '', incomplete: true });
   }
   return rows;
 }
 function serializeFlashcardRows(rows) {
   return rows.filter(row => row.question.trim() || row.answer.trim()).map(row => {
-    const answer = row.answer.trim().split(/\r?\n/);
-    return row.question.trim() + ' == ' + answer[0] + answer.slice(1).map(line => '\n  ' + line).join('');
+    const q = row.question.trim();
+    const answer = (row.answer || '').trim().split(/\r?\n/);
+    const sep = row.format || '==';
+    if (answer.length > 1 && /^\s*[-*+]/.test(answer[0])) {
+      return `- ${q} ${sep}\n` + answer.map(l => '  ' + l.trim()).join('\n');
+    }
+    if (!answer[0] && answer.length > 1) {
+      return `- ${q} ${sep}\n` + answer.slice(1).map(l => '  ' + (l.startsWith('- ') ? l : '- ' + l)).join('\n');
+    }
+    const firstLine = answer[0] ? ` ${sep} ${answer[0]}` : ` ${sep}`;
+    const rest = answer.slice(1).map(l => '\n  ' + l).join('');
+    return `- ${q}${firstLine}${rest}`;
   }).join('\n');
 }
 /** Numbered question/answer rows; the portable storage remains native Markdown. */
@@ -2392,10 +2585,10 @@ class NoteFlashcardEditor extends Modal {
       host.createEl('p', { cls: 'ia-muted', text: this.target ? 'Esta é a questão que você está respondendo. Markdown e links [[Nota]] funcionam nos dois campos. Ctrl+Enter salva e retorna à revisão.' : 'Um cartão em cada bloco numerado. Enter na pergunta vai para a resposta. Ctrl+Enter adiciona o próximo cartão. Markdown funciona nos dois campos.' });
       const modes = host.createDiv({ cls: 'ia-card-editor-modes' });
       this.cardsButton = this.view.button(modes, 'Cartões numerados', 'list-ordered', () => this.switchMode('cards'));
-      this.markdownButton = this.view.button(modes, 'Markdown ==', 'code', () => this.switchMode('markdown'));
+      this.markdownButton = this.view.button(modes, 'Markdown (RemNote)', 'code', () => this.switchMode('markdown'));
       this.view.button(modes, 'Colar vários cartões', 'clipboard-paste', () => this.openBulkPaste());
       this.bulkHost = host.createDiv({ cls: 'ia-flashcard-bulk' }); this.bulkHost.hidden = true;
-      this.bulkHost.createEl('p', { cls: 'ia-muted', text: 'Cole os cartões no formato Pergunta == Resposta e escolha onde inseri-los. A ordem dos cartões colados será mantida.' });
+      this.bulkHost.createEl('p', { cls: 'ia-muted', text: 'Cole os cartões em bullet ou linhas no formato RemNote (- Pergunta >> Resposta, ::, :::, {{omissão}} ou ==) e escolha onde inseri-los. A ordem dos cartões colados será mantida.' });
       const placement = this.bulkHost.createEl('label', { cls: 'ia-card-position' });
       placement.createSpan({ text: 'Inserir a partir da posição' });
       this.bulkPosition = placement.createEl('input', { attr: { type: 'number', min: '1', step: '1', 'aria-label': 'Inserir a partir da posição' } });
@@ -2970,6 +3163,45 @@ class SubboardModal extends Modal {
   }
   onClose() { this.contentEl.empty(); }
 }
+class ExcalidrawBoardModal extends Modal {
+  constructor(view) { super(view.app); this.view = view; this.board = view.board; }
+  onOpen() {
+    this.setTitle('Adicionar Desenho Excalidraw');
+    this.view.button(this.contentEl, 'Vincular desenho existente', 'folder-input', () => {
+      this.close();
+      const files = this.app.vault.getFiles().filter(f => f.extension === 'excalidraw' || f.name.endsWith('.excalidraw.md'));
+      new FilePicker(this.app, files, file => {
+        if (this.view.board === this.board) this.view.addVisualNote(file);
+      }, 'Escolher desenho Excalidraw…').open();
+    });
+    this.contentEl.createEl('p', { text: 'Ou crie um novo desenho:' });
+    const dateStr = new Date().toISOString().slice(0, 19).replace('T', ' ').replace(/:/g, '.');
+    const input = this.contentEl.createEl('input', { type: 'text', value: 'Desenho ' + dateStr, attr: { 'aria-label': 'Nome do desenho' } });
+    const button = this.contentEl.createEl('button', { text: 'Criar e desenhar', cls: 'mod-cta' });
+    const create = async () => {
+      if (button.disabled || !input.value.trim() || this.view.board !== this.board) return;
+      button.disabled = true;
+      try {
+        const targetFolder = 'Excalidraw';
+        if (!this.app.vault.folders.has(targetFolder)) await this.app.vault.createFolder(targetFolder);
+        const filePath = `${targetFolder}/${input.value.trim().replace(/[\\/:*?"<>|]/g, ' ')}.excalidraw.md`;
+        const initialContent = `---\n\nexcalidraw-plugin: parsed\ntags: [excalidraw]\n\n---\n==⚠  Switch to EXCALIDRAW VIEW in the MORE OPTIONS menu of this document. ⚠== You can decompress Drawing data with the command palette: 'Decompress current Excalidraw file'. For more info check in plugin settings under 'Saving'\n\n\n# Excalidraw Data\n\n## Text Elements\n\n%%\n# Drawing\n\`\`\`compressed-json\n\`\`\`\n%%\n`;
+        const file = await this.app.vault.create(filePath, initialContent);
+        if (this.view.board === this.board) this.view.addVisualNote(file);
+        await this.app.workspace.getLeaf('tab').openFile(file);
+        this.close();
+      } catch (error) {
+        new Notice('Erro ao criar desenho: ' + error.message);
+        button.disabled = false;
+      }
+    };
+    button.onclick = create;
+    input.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); create(); } };
+    input.focus();
+    input.select();
+  }
+  onClose() { this.contentEl.empty(); }
+}
 class BoardRenameModal extends Modal {
   constructor(view) { super(view.app); this.view = view; this.board = view.board; this.file = view.file; }
   onOpen() {
@@ -3201,8 +3433,7 @@ class FlashcardReviewModal extends Modal {
       this.view.button(done, 'Responder novamente', 'refresh-cw', () => restart([...this.cards])); return;
     }
     const card = this.cards[this.index], study = this.contentEl.createDiv({ cls: 'ia-review-study' });
-    study.createDiv({ cls: 'ia-eyebrow', text: `${this.index + 1} de ${this.cards.length} · ${card.nodeTitle || this.note?.basename || 'Flashcards'}` });
-    const question = study.createDiv({ cls: 'ia-flash-question' });
+    study.createDiv({ cls: 'ia-eyebrow', text: `${this.index + 1} de ${this.cards.length} · ${card.nodeTitle || this.note?.basename || 'Flashcards'}` }); if (card.parentPrompt || card.contextBreadcrumb) { const callout = study.createDiv({ cls: 'atlas-remnote-context-callout' }); callout.createSpan({ cls: 'atlas-remnote-context-pin', text: '↳' }); callout.createSpan({ cls: 'atlas-remnote-context-text', text: card.contextBreadcrumb || card.parentPrompt }); } const question = study.createDiv({ cls: 'ia-flash-question' });
     MarkdownRenderer.render(this.app, card.question, question, card.sourcePath || '', this.preview).catch(() => { if (question.isConnected) question.textContent = card.question; });
     study.createEl('label', { text: 'Sua resposta (opcional)', cls: 'ia-response-label' });
     const input = study.createEl('textarea', { cls: 'ia-flash-response', attr: { rows: '3', placeholder: 'Tente recordar antes de revelar…', 'aria-label': 'Sua resposta' } });
@@ -3636,6 +3867,7 @@ class AtlasView extends TextFileView {
     this.button(toolbar, 'Buscar notas e mapas', 'search', () => new AtlasBoardSearchModal(this.plugin).open());
     this.button(toolbar, 'Renomear whiteboard', 'square-pen', () => { if (this.file) new BoardRenameModal(this).open(); });
     this.button(toolbar, 'Subwhiteboard', 'panels-top-left', () => new SubboardModal(this).open());
+    this.button(toolbar, 'Desenho Excalidraw', 'palette', () => new ExcalidrawBoardModal(this).open());
     const back = this.backBoardButton = this.button(toolbar, 'Voltar ao quadro anterior', 'arrow-left', () => this.navigateWhiteboard(null));
     back.disabled = !this.plugin.whiteboardHistory?.get(this.leaf.id)?.length;
     this.button(toolbar, 'Imagem', 'image-plus', () => this.pickImage());
@@ -4304,6 +4536,17 @@ class AtlasView extends TextFileView {
     try {
       const raw = await this.readNote(file);
       if (!el.isConnected || el._atlasToken !== token || this.previewGeneration !== generation) return;
+      const isExcalidraw = file.extension === 'excalidraw' || file.name.endsWith('.excalidraw.md') || raw.includes('excalidraw-plugin: parsed');
+      if (isExcalidraw) {
+        el.empty();
+        const cardBox = el.createDiv({ cls: 'romus-board-excalidraw-card' });
+        const iconDiv = cardBox.createDiv({ cls: 'romus-excalidraw-card-icon' });
+        setIcon(iconDiv, 'palette');
+        cardBox.createEl('div', { cls: 'romus-excalidraw-card-title', text: file.basename });
+        const openBtn = cardBox.createEl('button', { cls: 'romus-excalidraw-card-btn', text: 'Abrir no Excalidraw' });
+        openBtn.onclick = (e) => { e.stopPropagation(); this.app.workspace.getLeaf('tab').openFile(file); };
+        return;
+      }
       const child = new Component(); this.addChild(child); this.previews.set(el, child);
       const compact = el.classList.contains('ia-note-content');
       const body = atlasNotePreviewText(raw, compact ? 8000 : 32000);
@@ -5880,6 +6123,18 @@ class AtlasReviewStore {
         const match = text.match(REVIEW_MARKER); if (match) { id = match[1]; return text; }
         id = uid(); return `${text}${text.endsWith('\n') ? '\n' : '\n\n'}<!-- image-atlas-fsrs-deck:${id} -->\n`;
       });
+      const openEditor = this.plugin.app.workspace?.getLeavesOfType?.('markdown')
+        ?.map(leaf => leaf.view)
+        ?.find(view => view?.file?.path === note.path && view.input);
+      if (openEditor) {
+        const marker = `<!-- image-atlas-fsrs-deck:${id} -->`;
+        if (openEditor.originalBody && !openEditor.originalBody.includes(marker)) {
+          openEditor.originalBody = `${openEditor.originalBody.trimEnd()}\n\n${marker}\n`;
+        }
+        if (openEditor.input && !openEditor.input.value.includes(marker)) {
+          openEditor.input.value = `${openEditor.input.value.trimEnd()}\n\n${marker}\n`;
+        }
+      }
       return id;
     })();
     this.sources.set(note.path, task);
@@ -6193,6 +6448,7 @@ class FlashcardReviewView extends (ItemView || TextFileView) {
       for (const id of held) if (!this.heldDecks?.has(id)) { const state = this.store.decks.get(id); state.refs++; state.lastUsed = Date.now(); }
       this.heldDecks = held; this.store.prune(); this.entries = data.entries; this.spec.title = data.title; this.title.textContent = data.title; this.note = data.note; this.noteCount = data.noteCount;
       this.chooseTopicButton.hidden = !this.spec.boardNotesOnly; this.filters.errors.hidden = this.filters.all.hidden = Boolean(this.spec.boardNotesOnly);
+      this.studyMode = this.spec.studyMode || (this.entries.some(e => e.cardType === 'cloze' || e.isCloze) && !this.entries.some(e => e.cardType !== 'cloze' && !e.isCloze) ? 'cloze-note' : (this.studyMode || 'flashcards'));
       this.start(this.mode);
       if (previous) {
         const currentId = previous.queue[previous.position]?.id;
@@ -6212,18 +6468,30 @@ class FlashcardReviewView extends (ItemView || TextFileView) {
       this.updateSaveStatus();
     } catch (error) { if (this.alive && loadToken === this.loadToken) { this.loadError = error; this.clearCache(); this.gradeHost.hidden = true; this.mount.textContent = 'Não foi possível carregar esta revisão. O conteúdo original foi preservado.'; this.status.textContent = error.message; this.status.addClass('is-error'); } }
   }
+  scopeEntries() {
+    if (this.studyMode === 'cloze-note') {
+      return this.entries.filter(e => e.cardType === 'cloze' || e.isCloze);
+    }
+    return this.entries.filter(e => e.cardType !== 'cloze' && !e.isCloze);
+  }
   stats() {
-    const now = Date.now(); return { new: this.entries.filter(e => !e.record.schedule || !e.record.schedule.reps).length, due: this.entries.filter(e => e.record.schedule?.reps && new Date(e.record.schedule.due).getTime() <= now).length, errors: this.entries.filter(e => e.record.needsReview).length };
+    const now = Date.now(), pool = this.scopeEntries();
+    return {
+      new: pool.filter(e => !e.record.schedule || !e.record.schedule.reps).length,
+      due: pool.filter(e => e.record.schedule?.reps && new Date(e.record.schedule.due).getTime() <= now).length,
+      errors: pool.filter(e => e.record.needsReview).length
+    };
   }
   updateStats() {
     if (!this.counters) return;
     const stats = this.stats(), startToday = new Date(); startToday.setHours(0, 0, 0, 0);
     const endToday = new Date(startToday); endToday.setHours(23, 59, 59, 999);
-    this.resetAvailable ||= Boolean(this.spec.notePath && this.entries.some(entry => {
+    const pool = this.scopeEntries();
+    this.resetAvailable ||= Boolean(this.spec.notePath && pool.some(entry => {
       const card = entry.record.schedule;
       return card?.reps && (new Date(card.due).getTime() <= endToday.getTime() || new Date(card.last_review).getTime() >= startToday.getTime() && new Date(card.last_review).getTime() <= Date.now());
     }));
-    this.counters.textContent = `${stats.due} vencidos · ${stats.new} novos · ${stats.errors} para rever · ${this.entries.length} no total`;
+    this.counters.textContent = `${stats.due} vencidos · ${stats.new} novos · ${stats.errors} para rever · ${pool.length} no total`;
     if (this.spec.boardNotesOnly) this.counters.textContent += ` · ${this.noteCount || 0} notas neste quadro`;
     this.resetButton.hidden = !this.spec.notePath || !this.resetAvailable;
   }
@@ -6238,7 +6506,8 @@ class FlashcardReviewView extends (ItemView || TextFileView) {
   start(mode) {
     if (this.spec.boardNotesOnly) mode = 'due';
     this.mode = mode; const now = Date.now();
-    this.queue = this.entries.filter(entry => mode === 'errors' ? entry.record.needsReview : mode === 'all' ? true : !entry.record.schedule || new Date(entry.record.schedule.due).getTime() <= now).map(entry => ({ entry, revealed: false, event: null, draft: '', expected: entry.record.revision }));
+    const pool = this.scopeEntries();
+    this.queue = pool.filter(entry => mode === 'errors' ? entry.record.needsReview : mode === 'all' ? true : !entry.record.schedule || new Date(entry.record.schedule.due).getTime() <= now).map(entry => ({ entry, revealed: false, event: null, draft: '', expected: entry.record.revision }));
     if (mode === 'due') this.queue.sort((a, b) => Number(Boolean(!a.entry.record.schedule)) - Number(Boolean(!b.entry.record.schedule)) || new Date(a.entry.record.schedule?.due || now) - new Date(b.entry.record.schedule?.due || now));
     this.position = 0; this.clearCache(); for (const [key, button] of Object.entries(this.filters)) button.setAttribute('aria-pressed', String(key === mode));
     this.hint.textContent = mode === 'due' ? 'Vencidos primeiro, depois os novos. Errei e Acertei calculam a próxima revisão.' : 'Revisão antecipada: as avaliações também atualizam o agendamento FSRS.';
@@ -6251,9 +6520,16 @@ class FlashcardReviewView extends (ItemView || TextFileView) {
     const key = item.entry.id; if (this.cache.has(key)) { const value = this.cache.get(key); this.cache.delete(key); this.cache.set(key, value); return value.ready; }
     const el = this.contentEl.ownerDocument.createElement('div'); el.className = 'ia-fsrs-card'; el.dataset.sourcePath = item.entry.sourcePath || '';
     const component = new Component(); component.load();
-    const heading = el.createDiv({ cls: 'romus-flashcard-header' }); heading.createSpan({ cls: 'romus-flashcard-kind', text: 'FLASHCARD' }); const source = heading.createEl('h3', { cls: 'romus-flashcard-title', text: item.entry.nodeTitle || this.spec.title || 'Flashcards' });
+    const heading = el.createDiv({ cls: 'romus-flashcard-header' });
+    let kindText = 'FLASHCARD';
+    if (item.entry.cardType === 'two-way') kindText = item.entry.direction === 'reverse' ? 'FLASHCARD · ⇄ 2 VIAS (VERSO)' : 'FLASHCARD · ⇄ 2 VIAS (FRENTE)';
+    else if (item.entry.cardType === 'cloze') kindText = 'FLASHCARD · [...] OMISSÃO';
+    else if (item.entry.cardType === 'concept') kindText = 'FLASHCARD · :: CONCEITO';
+    else if (item.entry.cardType === 'descriptor') kindText = 'FLASHCARD · ;; DESCRITOR';
+    heading.createSpan({ cls: 'romus-flashcard-kind', text: kindText });
+    const source = heading.createEl('h3', { cls: 'romus-flashcard-title', text: item.entry.nodeTitle || this.spec.title || 'Flashcards' });
     const failures = item.entry.record.history.filter(event => !event.undone && event.rating === 1).length;
-    const history = el.createDiv({ cls: 'ia-fsrs-history', text: `${item.entry.record.schedule?.reps || 0} revisões · ${failures} erros anteriores` }); heading.append(history); const question = el.createDiv({ cls: 'ia-flash-question' });
+    const history = el.createDiv({ cls: 'ia-fsrs-history', text: `${item.entry.record.schedule?.reps || 0} revisões · ${failures} erros anteriores` }); heading.append(history); if (item.entry.parentPrompt || item.entry.contextBreadcrumb) { const callout = el.createDiv({ cls: 'atlas-remnote-context-callout' }); callout.createSpan({ cls: 'atlas-remnote-context-pin', text: '↳' }); callout.createSpan({ cls: 'atlas-remnote-context-text', text: item.entry.contextBreadcrumb || item.entry.parentPrompt }); } const question = el.createDiv({ cls: 'ia-flash-question' });
     el.createEl('label', { cls: 'ia-response-label', text: 'Sua resposta (opcional)' });
     const input = el.createEl('textarea', { cls: 'ia-flash-response', attr: { rows: '3', 'aria-label': 'Sua resposta', placeholder: 'Tente recordar antes de revelar…' } }); input.value = item.draft; input.oninput = () => { value.item.draft = input.value; };
     const answerWrap = el.createDiv({ cls: 'ia-fsrs-answer-wrap' }); answerWrap.createDiv({ cls: 'ia-eyebrow', text: 'RESPOSTA' }); const answer = answerWrap.createDiv({ cls: 'ia-flash-answer' }); answerWrap.hidden = true;
@@ -6272,16 +6548,17 @@ class FlashcardReviewView extends (ItemView || TextFileView) {
     this.contentEl.ownerDocument.defaultView.clearTimeout(this.dueTimer);
     if (this.mode === 'due' && this.position === this.queue.length) {
       const last = new Map(this.queue.map(item => [item.entry.id, item]));
-      for (const entry of this.entries) if (entry.record.schedule?.reps && new Date(entry.record.schedule.due).getTime() <= Date.now() && (!last.has(entry.id) || last.get(entry.id).event)) this.queue.push({ entry, revealed: false, event: null, draft: '', expected: entry.record.revision });
+      const pool = this.scopeEntries();
+      for (const entry of pool) if (entry.record.schedule?.reps && new Date(entry.record.schedule.due).getTime() <= Date.now() && (!last.has(entry.id) || last.get(entry.id).event)) this.queue.push({ entry, revealed: false, event: null, draft: '', expected: entry.record.revision });
     }
     const token = ++this.renderToken, item = this.current(); this.updateStats(); this.previous.disabled = this.position <= 0; this.next.disabled = this.position >= this.queue.length;
     this.closeNotePreview(); this.linkHover = this.linkHoverShown = null;
     this.progress.style.width = `${this.queue.length ? this.position / this.queue.length * 100 : 100}%`; this.number.textContent = this.queue.length ? `${Math.min(this.position + 1, this.queue.length)} de ${this.queue.length}` : 'Nenhum cartão nesta fila';
     if (!item) {
       this.gradeHost.hidden = true; this.mount.empty(); const end = this.mount.createDiv({ cls: 'ia-fsrs-finished' }); end.createEl('h2', { text: this.queue.length ? 'Sessão concluída' : 'Você está em dia' });
-      const failures = this.entries.filter(e => e.record.needsReview).length;
+      const failures = this.scopeEntries().filter(e => e.record.needsReview).length;
       end.createEl('p', { text: `${failures} cartões marcados para rever. Os intervalos e os erros ficam salvos mesmo ao fechar a revisão.` });
-      const future = this.entries.filter(e => e.record.schedule).map(e => new Date(e.record.schedule.due).getTime()).filter(t => t > Date.now()).sort((a, b) => a - b)[0];
+      const future = this.scopeEntries().filter(e => e.record.schedule).map(e => new Date(e.record.schedule.due).getTime()).filter(t => t > Date.now()).sort((a, b) => a - b)[0];
       if (future) end.createEl('p', { text: `Próxima revisão: ${new Date(future).toLocaleString()}` });
       this.button(end, 'Atualizar vencidos', 'refresh-cw', () => this.start('due'));
       if (this.spec.boardNotesOnly) this.button(end, 'Escolher outro tema', 'list', () => new WhiteboardStudyPicker(this.plugin, this.spec.boardPath, this.popup?.origin || this.plugin.flashcardContext()).open());
@@ -6315,7 +6592,7 @@ class FlashcardReviewView extends (ItemView || TextFileView) {
     item.revealed = true; panel.answerWrap.hidden = false; this.updateGradeControls(item); this.gradeButtons[3].button.focus();
   }
   grade(rating) {
-    const item = this.current(); if (!item || !item.revealed || item.event || ![1, 3].includes(rating)) return;
+    const item = this.current(); if (!item || !item.revealed || item.event || ![1, 2, 3, 4].includes(rating)) return;
     try { item.event = this.store.rate(item.entry, rating, item.expected); this.position++; this.show(); }
     catch (error) { new Notice(error.message); }
   }
@@ -6528,7 +6805,7 @@ module.exports = class ImageAtlasPlugin extends Plugin {
     }
     return { title: board.title || file.basename, summaryNote: board.summaryNote, cards };
   }
-  reviewSourceTools() { return { parseNoteFlashcards, serializeFlashcardRows, parseBoard, readVisualBundle }; }
+  reviewSourceTools() { return { parseNoteFlashcards, parseClozes, serializeFlashcardRows, parseBoard, readVisualBundle, whiteboardFlashcardNotes }; }
   createFlashcardEditor(note, options = {}) { return new NoteFlashcardEditor(this.flashcardContext(), note, options); }
   editMediaFlashcards(note) { new NoteFlashcardEditor(this.flashcardContext(), note).open(); }
   flashcardContext() { return { app: this.app, plugin: this, button: AtlasView.prototype.button }; }
@@ -6563,10 +6840,10 @@ module.exports = class ImageAtlasPlugin extends Plugin {
       await this.app.workspace.revealLeaf(leaf); return leaf;
     } finally { if (spec.transferId) this.reviewTransfers?.delete(spec.transferId); }
   }
-  async openNoteFlashcardReview(note, view = this.flashcardContext()) {
+  async openNoteFlashcardReview(note, view = this.flashcardContext(), options = {}) {
     const cards = await this.readNoteFlashcards(note);
     if (!cards.length) { new Notice('Esta nota ainda não tem flashcards. Escreva Pergunta == Resposta para começar.'); new NoteFlashcardEditor(view, note).open(); return; }
-    return this.openReviewPopup({ notePath: note.path, title: note.basename }, view);
+    return this.openReviewPopup({ notePath: note.path, title: note.basename, ...options }, view);
   }
   async loadReviewEntries(spec) {
     const store = this.getReviewStore();

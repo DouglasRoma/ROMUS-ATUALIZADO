@@ -42,7 +42,8 @@ export function attachWikiLinks(editor) {
       // Do not insert into a note that was closed/replaced during an async create.
       if (!input.isConnected || input.selectionStart !== insertion.end || input.value.slice(insertion.start,insertion.end) !== insertion.raw) return;
       const end = input.value.slice(insertion.end).startsWith(']]') ? insertion.end+2 : insertion.end;
-      const target = app.metadataCache.fileToLinktext(file,editor.file.path,true);
+      const isImage = file && /^(png|jpe?g|webp|gif|svg|avif|bmp)$/i.test(file.extension);
+      const target = isImage ? file.name : app.metadataCache.fileToLinktext(file,editor.file.path,true);
       close(); input.setRangeText(`[[${target}]]`,insertion.start,end,'end'); input.focus({preventScroll:true});
       input.dispatchEvent(new Event('input',{bubbles:true}));
     } catch(error) { editor.status.textContent = error.message; }
@@ -53,7 +54,9 @@ export function attachWikiLinks(editor) {
     const before = input.value.slice(Math.max(0,input.selectionStart-250),input.selectionStart), found = before.match(/\[\[([^\[\]\n|]*)$/);
     if (!found) return close();
     const query = found[1].trim(), tokens = fold(query).split(/\s+/).filter(Boolean);
-    index ||= (app.getLinkableNotes?.()||app.getMainNotes()).map(file => ({file,title:file.basename,key:fold(file.basename+' '+file.path)}));
+    const notes = (app.getLinkableNotes?.()||app.getMainNotes()).map(file => ({file,title:file.basename,isImage:false,key:fold(file.basename+' '+file.path)}));
+    const images = (app.vault.getFiles?.()||[]).filter(f => /^(png|jpe?g|webp|gif|svg|avif|bmp)$/i.test(f.extension)).map(file => ({file,title:file.name,isImage:true,key:fold(file.name+' '+file.path)}));
+    index ||= [...notes, ...images];
     items = index.filter(item => tokens.every(token=>item.key.includes(token))).sort((a,b)=>Number(fold(b.title)===fold(query))-Number(fold(a.title)===fold(query)) || Number(fold(b.title).startsWith(fold(query)))-Number(fold(a.title).startsWith(fold(query))) || a.title.localeCompare(b.title)).slice(0,10);
     if (query && !index.some(item=>fold(item.title)===fold(query)||fold(item.file.path.replace(/\.md$/i,''))===fold(query))) items.push({title:query,create:true});
     close(); if (!items.length) return;

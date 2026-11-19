@@ -1,0 +1,75 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const AtlasPlugin = require('../src/engine.cjs');
+
+test('Cloze disambiguation: múltiplas lacunas com a mesma resposta são diferenciadas por posição e ID único', () => {
+  const plugin = new AtlasPlugin({ vault: {}, preferences: {} });
+  const tools = plugin.reviewSourceTools();
+
+  const noteContent = [
+    '# Micose Profunda',
+    '',
+    'O paciente A terá intradermo {{negativa}} em fase inicial.',
+    '',
+    'O paciente B terá intradermo {{positiva}} quando curado.',
+    '',
+    'O cultivo e exame direto são ambos {{negativa}} na fase latente.'
+  ].join('\n');
+
+  const parsed = tools.parseNoteFlashcards(noteContent, 'Notas/Micose Profunda.md');
+  const clozeCards = parsed.cards.filter(c => c.cardType === 'cloze');
+
+  assert.equal(clozeCards.length, 3, 'Deve extrair exatamente 3 cartões de cloze');
+  assert.equal(clozeCards[0].answer, 'negativa');
+  assert.equal(clozeCards[1].answer, 'positiva');
+  assert.equal(clozeCards[2].answer, 'negativa');
+
+  // As IDs e posições dos dois clozes com resposta 'negativa' DEVEM ser distintas
+  assert.notEqual(clozeCards[0].id, clozeCards[2].id, 'As IDs dos cartões devem ser diferentes');
+  assert.notEqual(clozeCards[0].sourceLine, clozeCards[2].sourceLine, 'As linhas de origem devem ser diferentes');
+  assert.equal(clozeCards[0].sourceLine, 3);
+  assert.equal(clozeCards[2].sourceLine, 7);
+});
+
+test('ScopeEntries: garante independência estrita entre cartões cloze e cartões convencionais', () => {
+  const plugin = new AtlasPlugin({ vault: {}, preferences: {} });
+  const tools = plugin.reviewSourceTools();
+
+  const mixedContent = [
+    '# Parasitologia',
+    '- Vetor == Pthirus pubis',
+    'La pediculosis afecta {{axila, pubis, vello}}.',
+    '- Agente etiológico >> Piojo'
+  ].join('\n');
+
+  const parsed = tools.parseNoteFlashcards(mixedContent, 'test.md');
+  assert.equal(parsed.cards.length, 3);
+
+  const clozeCards = parsed.cards.filter(c => c.cardType === 'cloze' || c.isCloze);
+  const normalCards = parsed.cards.filter(c => c.cardType !== 'cloze' && !c.isCloze);
+
+  assert.equal(clozeCards.length, 1, 'Deve haver exatamente 1 cloze');
+  assert.equal(normalCards.length, 2, 'Deve haver exatamente 2 flashcards normais');
+
+  // Simular mock de FlashcardReviewView
+  const view = {
+    entries: parsed.cards,
+    studyMode: 'cloze-note',
+    scopeEntries() {
+      if (this.studyMode === 'cloze-note') {
+        return this.entries.filter(e => e.cardType === 'cloze' || e.isCloze);
+      }
+      return this.entries.filter(e => e.cardType !== 'cloze' && !e.isCloze);
+    }
+  };
+
+  const scopedCloze = view.scopeEntries();
+  assert.equal(scopedCloze.length, 1);
+  assert.equal(scopedCloze[0].answer, 'axila, pubis, vello');
+
+  // Trocar para flashcards convencionais
+  view.studyMode = 'flashcards';
+  const scopedNormal = view.scopeEntries();
+  assert.equal(scopedNormal.length, 2);
+  assert.ok(scopedNormal.every(c => c.cardType !== 'cloze'));
+});
