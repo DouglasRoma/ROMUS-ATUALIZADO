@@ -4433,14 +4433,20 @@ class AtlasView extends TextFileView {
     this.prepareMind();
     for (const [id, owner] of this.noteMapOwners) {
       const root = this.board.nodes.find(n => n.id === id);
-      if (root && (root.x !== owner.x || root.y !== owner.y || root.w !== owner.w || root.h !== owner.h)) resizedMaps.add(id);
+      const ownerH = owner.h + (owner.type === 'note' ? 42 : 0);
+      if (root && (root.x !== owner.x || root.y !== owner.y || root.w !== owner.w || root.h !== ownerH)) {
+        root.x = owner.x; root.y = owner.y; root.w = owner.w; root.h = ownerH;
+        resizedMaps.add(id);
+      }
     }
     for (const node of this.board.nodes) if (this.directVisualNodes.has(node.id)) {
       const target = this.board.nodes.find(n => n.id === node.linkedVisualRoot);
-      if (target && (node.w !== target.w || node.h !== target.h)) { node.w = target.w; node.h = target.h; resizedMaps.add(node.mapId); }
+      const targetH = target ? target.h + (target.type === 'note' ? 42 : 0) : 0;
+      if (target && (node.w !== target.w || node.h !== targetH)) { node.w = target.w; node.h = targetH; resizedMaps.add(node.mapId); }
     }
     for (const node of this.board.nodes) {
       if (node.type === 'mind' && !node.visualExpanded && !node.relation) {
+        if (this.noteMapOwners?.has(node.id) || this.directVisualNodes?.has(node.id)) continue;
         if (node.noteExpanded && node.path) {
           const targetH = Math.max(180, node.expandedHeight || 220);
           const targetW = Math.max(260, node.expandedWidth || 300);
@@ -4911,6 +4917,21 @@ class AtlasView extends TextFileView {
           return;
         }
       }
+      if (dragType === 'node' && movedNode?.type === 'note' && movedNode.noteMaps?.length) {
+        for (const mapId of movedNode.noteMaps) {
+          const root = this.board.nodes.find(n => n.id === mapId && n.type === 'mind');
+          if (root) {
+            root.x = movedNode.x;
+            root.y = movedNode.y;
+            this.layoutMind(mapId);
+          }
+        }
+        this.render();
+      }
+      if (dragType === 'resize' && movedNode?.type === 'note' && movedNode.noteMaps?.length) {
+        for (const mapId of movedNode.noteMaps) this.layoutMind(mapId);
+        this.render();
+      }
       if (groupedMove) { this.drawEdges(); this.drawGroups(); }
       if (groupMove || groupedMove) this.rememberVisualLayout();
       this.changed(false, visual);
@@ -4924,7 +4945,7 @@ class AtlasView extends TextFileView {
     const p = point.pin && n.pins?.find(item => item.id === point.pin);
     if (p) return n.type === 'web' ? { x: n.x + n.w, y: n.y + 42 + Math.min(n.h - 20, 155 + n.pins.indexOf(p) * 36) } : { x: n.x + p.u * n.w, y: n.y + 42 + p.v * n.h };
     const right = !other || other.x >= n.x + n.w / 2;
-    return { x: n.x + (right ? n.w : 0), y: n.y + (n.type === 'mind' ? (n.noteExpanded ? 20 : n.h / 2) : 42 + n.h / 2) };
+    return { x: n.x + (right ? n.w : 0), y: n.y + (n.type === 'mind' ? (n.noteExpanded ? 20 : n.h / 2) : (n.type === 'note' || n.type === 'whiteboard' ? (n.h + 42) / 2 : 42 + n.h / 2)) };
   }
   /** Reuse SVG elements; dragging touches only the moved node's adjacent connectors. */
   drawEdges(nodeId) {
@@ -5375,10 +5396,13 @@ class AtlasView extends TextFileView {
     this.sizeRelationLabels(mapId);
     this.prepareMind(); const root = this.board.nodes.find(n => n.id === mapId && n.type === 'mind'); if (!root) return;
     const owner = this.noteMapOwners.get(mapId);
-    if (owner) { root.x = owner.x; root.y = owner.y; root.w = owner.w; root.h = owner.h; }
-    for (const node of this.board.nodes) if (node.mapId === mapId && node.visualAsChild && node.visualExpanded) { const target = this.board.nodes.find(n => n.id === node.linkedVisualRoot); if (target) { node.w = target.w; node.h = target.h; } }
+    if (owner) { root.x = owner.x; root.y = owner.y; root.w = owner.w; root.h = owner.h + (owner.type === 'note' ? 42 : 0); }
+    for (const node of this.board.nodes) if (node.mapId === mapId && node.visualAsChild && node.visualExpanded) { const target = this.board.nodes.find(n => n.id === node.linkedVisualRoot); if (target) { node.w = target.w; node.h = target.h + (target.type === 'note' ? 42 : 0); } }
     for (const node of this.board.nodes) {
-      if (node.mapId === mapId && node.type === 'mind' && !node.visualExpanded && !node.relation) {
+      if (node.mapId === mapId && node.type === 'mind' && !node.relation) {
+        if (node === root && owner) continue;
+        if (this.noteMapOwners?.has(node.id) || this.directVisualNodes?.has(node.id)) continue;
+        if (node.visualAsChild && node.visualExpanded) continue;
         if (node.noteExpanded && node.path) {
           node.h = Math.max(180, node.expandedHeight || 220);
           node.w = Math.max(260, node.expandedWidth || 300);
