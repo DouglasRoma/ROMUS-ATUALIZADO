@@ -337,14 +337,14 @@ a.romus-cloze-editor-pill[data-has-tag="true"]::before{content:'🎴 ' attr(data
 
 /* Whiteboard Canvas Grid Modes */
 .ia-viewport.has-grid-dots {
-  background-image: radial-gradient(circle, var(--text-faint, rgba(255, 255, 255, 0.18)) 1.2px, transparent 1.2px);
-  background-size: 24px 24px;
+  background-image: radial-gradient(circle, var(--text-faint, rgba(255, 255, 255, 0.22)) 1.5px, transparent 1.5px) !important;
+  background-size: var(--grid-size, 24px) var(--grid-size, 24px) !important;
 }
 .ia-viewport.has-grid-lines {
   background-image: 
     linear-gradient(to right, color-mix(in srgb, var(--background-modifier-border) 60%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in srgb, var(--background-modifier-border) 60%, transparent) 1px, transparent 1px);
-  background-size: 24px 24px;
+    linear-gradient(to bottom, color-mix(in srgb, var(--background-modifier-border) 60%, transparent) 1px, transparent 1px) !important;
+  background-size: var(--grid-size, 24px) var(--grid-size, 24px) !important;
 }
 .ia-viewport.has-no-grid {
   background-image: none !important;
@@ -353,20 +353,24 @@ a.romus-cloze-editor-pill[data-has-tag="true"]::before{content:'🎴 ' attr(data
 /* Whiteboard Drawing Canvas */
 .ia-drawings {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
   pointer-events: none;
-  z-index: 5;
+  z-index: 6;
 }
 .ia-draw-svg {
   position: absolute;
-  top: 0;
   left: 0;
-  width: 100000px;
-  height: 100000px;
+  top: 0;
+  width: 1px;
+  height: 1px;
   overflow: visible;
   pointer-events: none;
 }
 .ia-draw-stroke {
+  fill: none;
   pointer-events: none;
 }
 .ia-viewport.mode-draw {
@@ -457,78 +461,231 @@ a.romus-cloze-editor-pill[data-has-tag="true"]::before{content:'🎴 ' attr(data
   border: 1px solid color-mix(in srgb, var(--text-error) 40%, transparent);
 }
 
-/* VisualOS-Style Mind Map Nodes */
+/* VisualOS-Style Mind Map Nodes (Capsule Pill) */
 .ia-card.ia-mind {
-  border-radius: 12px;
-  border-left: 5px solid var(--ia-mind-color, var(--text-accent));
-  background: color-mix(in srgb, var(--surface-card, #1e2025) 96%, transparent);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28);
-  backdrop-filter: blur(8px);
-  transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  border-radius: 24px !important;
+  border: 1.5px solid var(--ia-mind-color, var(--text-accent)) !important;
+  background: color-mix(in srgb, var(--surface-card, #1e2025) 96%, transparent) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.28) !important;
+  backdrop-filter: blur(8px) !important;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.1s ease !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+  padding: 0 !important;
 }
 .ia-card.ia-mind:hover {
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.42) !important;
 }
 .ia-card.ia-mind.is-selected {
-  outline: 2px solid var(--ia-mind-color, var(--text-accent));
-  outline-offset: 3px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  outline: 2px solid var(--ia-mind-color, var(--text-accent)) !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5) !important;
 }
 .ia-card.ia-mind .ia-card-head {
-  border-radius: 10px 10px 0 0;
-  padding: 8px 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  border-radius: 24px !important;
+  padding: 0 12px !important;
+  height: 100% !important;
+  display: flex !important;
+  flex: 1 1 auto !important;
+  align-items: center !important;
+  gap: 8px !important;
+  border-bottom: none !important;
+  background: transparent !important;
+  user-select: none !important;
+  cursor: grab !important;
 }
 .ia-card.ia-mind .ia-card-title {
-  font-size: 13.5px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text-normal);
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+  color: var(--text-normal) !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+  flex: 1 1 auto !important;
 }
 .ia-card.ia-mind .ia-mind-note-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 12px;
-  border: 1px solid color-mix(in srgb, var(--text-accent) 40%, transparent);
-  background: color-mix(in srgb, var(--text-accent) 12%, transparent);
-  color: var(--text-accent);
-  cursor: pointer;
-  transition: all 0.15s ease;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  padding: 2px 7px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  border-radius: 12px !important;
+  border: 1px solid color-mix(in srgb, var(--text-accent) 40%, transparent) !important;
+  background: color-mix(in srgb, var(--text-accent) 12%, transparent) !important;
+  color: var(--text-accent) !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+  flex-shrink: 0 !important;
 }
 .ia-card.ia-mind .ia-mind-note-badge:hover {
-  background: var(--text-accent);
-  color: var(--text-on-accent);
+  background: var(--text-accent) !important;
+  color: var(--text-on-accent) !important;
 }
 .ia-card.ia-mind .ia-mind-note-badge.is-linked {
-  border-color: color-mix(in srgb, #10b981 40%, transparent);
-  background: color-mix(in srgb, #10b981 12%, transparent);
-  color: #10b981;
+  border-color: color-mix(in srgb, #10b981 40%, transparent) !important;
+  background: color-mix(in srgb, #10b981 12%, transparent) !important;
+  color: #10b981 !important;
 }
 .ia-card.ia-mind .ia-mind-note-badge.is-linked:hover {
-  background: #10b981;
-  color: #ffffff;
+  background: #10b981 !important;
+  color: #ffffff !important;
 }
 .ia-mind-note-badge svg {
-  width: 12px;
-  height: 12px;
+  width: 12px !important;
+  height: 12px !important;
+}
+.ia-card.ia-mind .ia-mind-add-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 50% !important;
+  border: 1px solid color-mix(in srgb, var(--ia-mind-color, var(--text-accent)) 50%, transparent) !important;
+  background: color-mix(in srgb, var(--ia-mind-color, var(--text-accent)) 20%, transparent) !important;
+  color: var(--ia-mind-color, var(--text-accent)) !important;
+  padding: 0 !important;
+  cursor: pointer !important;
+  flex-shrink: 0 !important;
+  opacity: 0.7;
+  transition: all 0.15s ease !important;
+}
+.ia-card.ia-mind .ia-mind-add-btn:hover {
+  opacity: 1;
+  background: var(--ia-mind-color, var(--text-accent)) !important;
+  color: #ffffff !important;
+}
+.ia-card.ia-mind .ia-mind-add-btn svg {
+  width: 12px !important;
+  height: 12px !important;
+}
+.ia-card.ia-mind .ia-mind-collapse-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 18px !important;
+  height: 18px !important;
+  border: none !important;
+  background: transparent !important;
+  color: var(--text-muted) !important;
+  padding: 0 !important;
+  cursor: pointer !important;
+  flex-shrink: 0 !important;
+}
+.ia-card.ia-mind .ia-mind-collapse-btn:hover {
+  color: var(--text-normal) !important;
+}
+.ia-card.ia-mind .ia-mind-collapse-btn svg {
+  width: 13px !important;
+  height: 13px !important;
+}
+
+/* Mind Node With Image Thumbnail (Conventional Mind Map) */
+.ia-card.ia-mind.has-thumb-image {
+  flex-direction: column !important;
+  border-radius: 14px !important;
+  overflow: hidden !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+}
+.ia-card.ia-mind .ia-mind-thumb {
+  width: 100% !important;
+  height: 85px !important;
+  overflow: hidden !important;
+  background: var(--background-secondary-alt) !important;
+  border-bottom: 1px solid var(--background-modifier-border) !important;
+  cursor: pointer !important;
+  position: relative !important;
+  flex: none !important;
+}
+.ia-card.ia-mind .ia-mind-thumb img {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  display: block !important;
+  transition: transform 0.2s ease !important;
+}
+.ia-card.ia-mind .ia-mind-thumb:hover img {
+  transform: scale(1.05) !important;
+}
+.ia-card.ia-mind.has-thumb-image .ia-card-head {
+  height: 38px !important;
+  width: 100% !important;
+  border-radius: 0 0 14px 14px !important;
+  padding: 0 10px !important;
+  flex: none !important;
+}
+
+/* Mind Node Expanded (Full Note View Inline) */
+.ia-card.ia-mind.is-expanded-note {
+  flex-direction: column !important;
+  border-radius: 14px !important;
+  overflow: hidden !important;
+  align-items: stretch !important;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45) !important;
+}
+.ia-card.ia-mind.is-expanded-note .ia-card-head {
+  height: 38px !important;
+  width: 100% !important;
+  border-radius: 14px 14px 0 0 !important;
+  border-bottom: 1px solid var(--background-modifier-border) !important;
+  background: var(--background-secondary) !important;
+  padding: 0 10px !important;
+  flex: none !important;
+}
+.ia-card.ia-mind.is-expanded-note .ia-note-content {
+  flex: 1 1 auto !important;
+  overflow-y: auto !important;
+  padding: 12px 14px !important;
+  font-size: 13px !important;
+  background: var(--background-primary) !important;
+  min-height: 120px !important;
+  user-select: text !important;
+}
+.ia-card.ia-mind .ia-mind-open-note-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 4px !important;
+  border: none !important;
+  background: transparent !important;
+  color: var(--text-muted) !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  flex-shrink: 0 !important;
+}
+.ia-card.ia-mind .ia-mind-open-note-btn:hover {
+  background: var(--background-modifier-hover) !important;
+  color: var(--text-normal) !important;
+}
+.ia-card.ia-mind .ia-mind-open-note-btn svg {
+  width: 12px !important;
+  height: 12px !important;
+}
+.ia-card.ia-mind .ia-mind-note-badge.is-expanded {
+  border-color: color-mix(in srgb, var(--interactive-accent) 50%, transparent) !important;
+  background: var(--interactive-accent) !important;
+  color: var(--text-on-accent) !important;
 }
 
 /* VisualOS Mind Map Smooth Splines */
 .ia-line.ia-mind-edge {
-  stroke-width: 2.2px;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.25));
-  transition: stroke-width 0.15s ease;
+  stroke-width: 2.2px !important;
+  stroke-linecap: round !important;
+  stroke-linejoin: round !important;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.25)) !important;
+  transition: stroke-width 0.15s ease !important;
 }
 .ia-line.ia-mind-edge:hover {
-  stroke-width: 3.5px;
+  stroke-width: 3.8px !important;
 }
 .ia-mind-dot {
   opacity: 0.85;

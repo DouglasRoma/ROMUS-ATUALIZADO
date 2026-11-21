@@ -4212,6 +4212,11 @@ class AtlasView extends TextFileView {
   camera() {
     if (!this.world) return;
     const c = this.board.camera; this.world.style.transform = `translate(${c.x}px, ${c.y}px) scale(${c.z})`;
+    if (this.viewport) {
+      const gridSize = Math.max(12, 24 * c.z);
+      this.viewport.style.setProperty('--grid-size', `${gridSize}px`);
+      this.viewport.style.backgroundPosition = `${c.x % gridSize}px ${c.y % gridSize}px`;
+    }
     for (const n of this.webNodes || []) { const el = this.nodeElements?.get(n.id); if (el) this.place(el, n); }
     if (this.zoomLabel) this.zoomLabel.textContent = `${Math.round(c.z * 100)}%`;
     const detail = c.z >= .35;
@@ -4254,11 +4259,104 @@ class AtlasView extends TextFileView {
     this.camera(); this.changed(false, false);
   }
   focusNode(node) { const c = this.board.camera; c.x = this.viewport.clientWidth / 2 - (node.x + node.w / 2) * c.z; c.y = this.viewport.clientHeight / 2 - (node.y + (node.h + 42) / 2) * c.z; this.camera(); this.changed(false, false); }
+  getMindNodeImage(node) {
+    if (!node) return null;
+    if (node.coverImage) return node.coverImage;
+    if (node.image) return node.image;
+    if (!node.path) return null;
+    this.mindThumbCache ||= new Map();
+    if (this.mindThumbCache.has(node.path)) return this.mindThumbCache.get(node.path);
+    const file = this.app.vault.getFileByPath(node.path);
+    if (!file) return null;
+    const cache = this.app.metadataCache?.getFileCache?.(file);
+    if (cache?.frontmatter?.image || cache?.frontmatter?.cover) {
+      const imgTarget = cache.frontmatter.image || cache.frontmatter.cover;
+      const imgFile = this.app.metadataCache?.getFirstLinkpathDest?.(imgTarget, node.path) || this.app.vault?.getFileByPath?.(imgTarget);
+      if (imgFile) {
+        const url = this.app.vault.getResourcePath(imgFile);
+        this.mindThumbCache.set(node.path, url);
+        return url;
+      }
+      if (safeUrl(imgTarget)) {
+        this.mindThumbCache.set(node.path, imgTarget);
+        return imgTarget;
+      }
+    }
+    if (cache?.embeds?.length) {
+      for (const embed of cache.embeds) {
+        if (/\.(png|jpe?g|webp|gif|svg|avif|bmp)$/i.test(embed.link || '')) {
+          const imgFile = this.app.metadataCache?.getFirstLinkpathDest?.(embed.link, node.path) || this.app.vault?.getFileByPath?.(embed.link);
+          if (imgFile) {
+            const url = this.app.vault.getResourcePath(imgFile);
+            this.mindThumbCache.set(node.path, url);
+            return url;
+          }
+        }
+      }
+    }
+    if (!this.pendingThumbScans) this.pendingThumbScans = new Set();
+    if (!this.pendingThumbScans.has(node.path)) {
+      this.pendingThumbScans.add(node.path);
+      this.app.vault.cachedRead(file).then(raw => {
+        this.pendingThumbScans.delete(node.path);
+        const wiki = raw.match(/!\[\[([^|\]\r\n]+?\.(?:png|jpe?g|webp|gif|svg|avif|bmp))(?:\s*\|.*?)?\]\]/i);
+        if (wiki) {
+          const imgFile = this.app.metadataCache?.getFirstLinkpathDest?.(wiki[1].trim(), node.path) || this.app.vault?.getFileByPath?.(wiki[1].trim());
+          if (imgFile) {
+            this.mindThumbCache.set(node.path, this.app.vault.getResourcePath(imgFile));
+            this.render();
+            return;
+          }
+        }
+        const md = raw.match(/!\[[^\]]*\]\(([^)\r\n]+?\.(?:png|jpe?g|webp|gif|svg|avif|bmp)(?:\?[^)]*)?)\)/i);
+        if (md) {
+          const rawUrl = md[1].trim().replace(/^<|>$/g, '');
+          if (/^https?:|^data:image\//i.test(rawUrl)) {
+            this.mindThumbCache.set(node.path, rawUrl);
+            this.render();
+            return;
+          }
+          const imgFile = this.app.metadataCache?.getFirstLinkpathDest?.(rawUrl, node.path) || this.app.vault?.getFileByPath?.(rawUrl);
+          if (imgFile) {
+            this.mindThumbCache.set(node.path, this.app.vault.getResourcePath(imgFile));
+            this.render();
+            return;
+          }
+        }
+        this.mindThumbCache.set(node.path, null);
+      }).catch(() => { this.pendingThumbScans.delete(node.path); });
+    }
+    return null;
+  }
+  toggleMindNoteExpanded(node) {
+    if (!node || !node.path) return;
+    this.checkpoint('board');
+    node.noteExpanded = !node.noteExpanded;
+    if (node.noteExpanded) {
+      node.w = Math.max(260, node.expandedWidth || 300);
+      node.h = Math.max(180, node.expandedHeight || 220);
+    } else {
+      const thumbUrl = this.getMindNodeImage(node);
+      if (thumbUrl) {
+        node.h = 125;
+        node.w = Math.max(180, Math.min(280, (node.title?.length || 10) * 8.5 + 90));
+      } else {
+        node.h = node.parentId ? 36 : 40;
+        node.w = Math.max(160, Math.min(280, (node.title?.length || 10) * 8.5 + 90));
+      }
+    }
+    this.layoutMind(node.mapId);
+    this.selected = { node: node.id };
+    this.changed();
+    this.render();
+    this.focusNode(node);
+  }
   nodeRenderKey(node) {
     const byId = this.nodeById;
     const owned = (node.noteMaps || []).map(id => [id, byId.get(id)?.pinHidden]);
     const pins = (node.pins || []).map(pin => [pin, pin.mapRoot && byId.get(pin.mapRoot)?.pinHidden, this.pinnedSummary(node, pin)?.id]);
-    return JSON.stringify([node.type, node.title, node.path, node.mediaNote, node.visualNote, node.visualSource, node.visualChildOf, node.linkedVisualRoot, node.color, node.relation, node.body, node.collapsed, node.visualExpanded, node.visualAsChild, node.flashcards?.length, Boolean(this.mindChildren.get(node.id)?.length), owned, pins, byId.get(node.visualChildOf)?.title]);
+    const thumb = node.type === 'mind' ? this.getMindNodeImage(node) : null;
+    return JSON.stringify([node.type, node.title, node.path, node.mediaNote, node.visualNote, node.visualSource, node.visualChildOf, node.linkedVisualRoot, node.color, node.relation, node.body, node.collapsed, node.visualExpanded, node.visualAsChild, node.noteExpanded, thumb, node.flashcards?.length, Boolean(this.mindChildren.get(node.id)?.length), owned, pins, byId.get(node.visualChildOf)?.title]);
   }
   drawNodes() {
     this.subboardObserver?.disconnect();
@@ -4279,6 +4377,26 @@ class AtlasView extends TextFileView {
     for (const node of this.board.nodes) if (this.directVisualNodes.has(node.id)) {
       const target = this.board.nodes.find(n => n.id === node.linkedVisualRoot);
       if (target && (node.w !== target.w || node.h !== target.h)) { node.w = target.w; node.h = target.h; resizedMaps.add(node.mapId); }
+    }
+    for (const node of this.board.nodes) {
+      if (node.type === 'mind' && !node.visualExpanded && !node.relation) {
+        if (node.noteExpanded && node.path) {
+          const targetH = Math.max(180, node.expandedHeight || 220);
+          const targetW = Math.max(260, node.expandedWidth || 300);
+          if (node.h !== targetH || node.w !== targetW) { node.h = targetH; node.w = targetW; resizedMaps.add(node.mapId); }
+        } else {
+          const thumbUrl = node.path ? this.getMindNodeImage(node) : null;
+          if (thumbUrl) {
+            const targetH = 125;
+            const targetW = Math.max(180, Math.min(280, (node.title?.length || 10) * 8.5 + 90));
+            if (node.h !== targetH || node.w !== targetW) { node.h = targetH; node.w = targetW; resizedMaps.add(node.mapId); }
+          } else {
+            const targetH = node.parentId ? 36 : 40;
+            const targetW = Math.max(160, Math.min(280, (node.title?.length || 10) * 8.5 + 90));
+            if (node.h !== targetH || node.w !== targetW) { node.h = targetH; node.w = targetW; resizedMaps.add(node.mapId); }
+          }
+        }
+      }
     }
     for (const mapId of resizedMaps) this.layoutMind(mapId);
     this.alignVisualChildren();
@@ -4429,30 +4547,91 @@ class AtlasView extends TextFileView {
         if (this.webObserver) this.webObserver.observe(el); else { this.visibleWeb.add(n.id); activate(n); }
       } else if (n.type === 'mind') {
         el.style.setProperty('--ia-mind-color', /^#[0-9a-f]{6}$/i.test(n.color) ? n.color : COLORS[0]);
-        const quick = n.relation ? head : el.createDiv({ cls: 'ia-node-quick-actions' });
-        const quickAction = (label, icon, run) => {
-          const b = n.relation ? quick.createEl('button', { cls: 'ia-node-menu ia-quick-icon', attr: { title: label, 'aria-label': label } }) : this.button(quick, label, icon, run);
-          if (n.relation) { setIcon(b, icon); b.onclick = e => { e.stopPropagation(); run(); }; }
-          b.onpointerdown = e => e.stopPropagation(); return b;
-        };
-        quickAction('Criar flashcard', 'layers', () => this.createFlashcard(n));
-        if (this.mindChildren.get(n.id)?.length) {
-          const toggle = quickAction(n.collapsed ? 'Expandir' : 'Recolher', n.collapsed ? 'chevron-right' : 'chevron-down', () => this.collapseMind(n));
-          toggle.setAttribute('aria-expanded', String(!n.collapsed));
+        for (const child of Array.from(el.children)) {
+          if (child !== head) child.remove();
         }
+        const thumbUrl = !n.noteExpanded && n.path ? this.getMindNodeImage(n) : null;
+        el.classList.toggle('is-expanded-note', Boolean(n.noteExpanded && n.path));
+        el.classList.toggle('has-thumb-image', Boolean(thumbUrl));
+
+        if (thumbUrl && !n.noteExpanded) {
+          const thumb = el.createDiv({ cls: 'ia-mind-thumb' });
+          thumb.createEl('img', { attr: { src: thumbUrl, alt: n.title, draggable: 'false' } });
+          el.prepend(thumb);
+          thumb.onclick = e => {
+            e.stopPropagation();
+            this.toggleMindNoteExpanded(n);
+          };
+        }
+
+        if (n.path) {
+          const expandBtn = head.createSpan({ cls: `ia-mind-note-badge is-linked ${n.noteExpanded ? 'is-expanded' : ''}` });
+          setIcon(expandBtn, n.noteExpanded ? 'chevrons-down-up' : 'chevrons-up-down');
+          expandBtn.createSpan({ text: n.noteExpanded ? 'Recolher' : 'Expandir' });
+          expandBtn.title = n.noteExpanded ? 'Recolher conteúdo da nota' : 'Expandir conteúdo da nota no mapa';
+          expandBtn.onpointerdown = e => e.stopPropagation();
+          expandBtn.onclick = e => {
+            e.stopPropagation();
+            this.toggleMindNoteExpanded(n);
+          };
+
+          const openNoteBtn = head.createEl('button', { cls: 'ia-mind-open-note-btn', attr: { title: 'Abrir nota Markdown no editor', 'aria-label': 'Abrir nota' } });
+          setIcon(openNoteBtn, 'external-link');
+          openNoteBtn.onpointerdown = e => e.stopPropagation();
+          openNoteBtn.onclick = e => {
+            e.stopPropagation();
+            this.openNote(n.path);
+          };
+        } else {
+          const noteBadge = head.createSpan({ cls: 'ia-mind-note-badge' });
+          setIcon(noteBadge, 'file-plus');
+          noteBadge.createSpan({ text: '+ Nota' });
+          noteBadge.title = 'Criar nota Markdown deste nó';
+          noteBadge.onpointerdown = e => e.stopPropagation();
+          noteBadge.onclick = async e => {
+            e.stopPropagation();
+            await this.convertMindNote(n);
+          };
+        }
+
+        if (this.mindChildren.get(n.id)?.length) {
+          const toggle = head.createEl('button', { cls: 'ia-mind-collapse-btn', attr: { title: n.collapsed ? 'Expandir filhos' : 'Recolher filhos', 'aria-label': n.collapsed ? 'Expandir' : 'Recolher' } });
+          setIcon(toggle, n.collapsed ? 'chevron-right' : 'chevron-down');
+          toggle.onpointerdown = e => e.stopPropagation();
+          toggle.onclick = e => { e.stopPropagation(); this.collapseMind(n); };
+        }
+        const addChild = head.createEl('button', { cls: 'ia-mind-add-btn', attr: { title: 'Adicionar nó filho (Tab)', 'aria-label': 'Adicionar filho' } });
+        setIcon(addChild, 'plus');
+        addChild.onpointerdown = e => e.stopPropagation();
+        addChild.onclick = e => { e.stopPropagation(); this.addMindNode(n); };
         const options = head.createEl('button', { cls: 'ia-node-menu', attr: { 'aria-label': `Opções de ${n.title}`, title: 'Opções do nó · Botão direito também abre', 'aria-haspopup': 'menu' } });
         setIcon(options, 'ellipsis'); options.onpointerdown = e => e.stopPropagation();
         options.onclick = e => { e.preventDefault(); e.stopPropagation(); this.showMindMenu(n, e, options); };
         el.oncontextmenu = e => { if (e.target.closest('input,textarea,a,[contenteditable=true]')) return; e.preventDefault(); e.stopPropagation(); this.showMindMenu(n, e); };
-        if (n.relation) { /* The compact junction is the relation's visible label. */ }
-        else if (n.visualAsChild && !n.visualExpanded) el.createDiv({ cls: 'ia-mind-text', text: 'Nota visual recolhida · Expanda para mostrar o conteúdo.' });
-        else if (n.path) {
-          const note = el.createDiv({ cls: 'ia-note-content ia-mind-content' }); el.setAttribute('data-ia-node', n.id);
-          if (this.noteObserver) { note.createSpan({ text: 'Carregando nota…', cls: 'ia-muted' }); this.noteObserver.observe(el); }
-          else { this.visibleNotes.add(n.id); this.queueNotePreview(n.path, note); }
-        } else el.createDiv({ cls: 'ia-mind-text', text: n.body || 'Adicione filhos ou transforme este nó em uma nota.' });
-        el.ondblclick = event => { if (!event.target.closest('button,a,input')) { event.stopPropagation(); if (n.relation) this.renameMindInline(n); else n.path ? this.openLinkedVisualOrNote(n) : this.editMind(n); } };
-        el.onclick = event => { if (event.target.closest('button,a')) return; this.viewport.focus(); if (this.mode === 'connect') this.connect({ node: n.id }); else { this.selected = { node: n.id }; this.highlight(); this.showSelection(); } };
+        el.ondblclick = event => {
+          if (!event.target.closest('button,a,input')) {
+            event.stopPropagation();
+            this.renameMindInline(n);
+          }
+        };
+        el.onclick = event => {
+          if (event.target.closest('button,a')) return;
+          this.viewport.focus();
+          if (this.mode === 'connect') this.connect({ node: n.id });
+          else { this.selected = { node: n.id }; this.highlight(); this.showSelection(); }
+        };
+
+        if (n.noteExpanded && n.path) {
+          const noteEl = el.createDiv({ cls: 'ia-note-content' });
+          el.setAttribute('data-ia-node', n.id);
+          if (this.noteObserver) {
+            noteEl.createSpan({ text: 'Carregando nota…', cls: 'ia-muted' });
+            this.noteObserver.observe(el);
+          } else {
+            this.visibleNotes.add(n.id);
+            this.queueNotePreview(n.path, noteEl);
+          }
+        }
       } else if (n.type === 'whiteboard') {
         const icon = head.createSpan({ cls: 'ia-board-icon' }); setIcon(icon, 'panels-top-left'); head.insertBefore(icon, cardTitle);
         const preview = el.createDiv({ cls: 'ia-board-preview', attr: { 'data-board-node': n.id } });
@@ -4478,7 +4657,7 @@ class AtlasView extends TextFileView {
         note.onclick = e => { if (e.target.closest('a')) return; if (this.mode === 'connect') this.connect({ node: n.id }); else { this.selected = { node: n.id }; this.highlight(); this.showSelection(); } };
       }
       const resize = el.createEl('button', { cls: 'ia-resize', attr: { 'aria-label': 'Redimensionar cartão' } }); setIcon(resize, 'grip');
-      if (n.relation) resize.style.display = 'none';
+      if (n.relation || (n.type === 'mind' && !n.noteExpanded)) resize.style.display = 'none';
       resize.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); this.drag = { type: 'resize', node: n, cx: e.clientX, cy: e.clientY, w: n.w, h: n.h, pointerId: e.pointerId, pendingCheckpoint: true }; };
       if (n.type === 'web') this.place(el, n);
     }
@@ -4500,7 +4679,9 @@ class AtlasView extends TextFileView {
     const placement = `${n.type}:${n.x}:${n.y}:${n.w}:${n.h}`;
     if (el._atlasPlacement === placement) return;
     el._atlasPlacement = placement;
-    el.style.left = `${n.x}px`; el.style.top = `${n.y}px`; el.style.width = `${n.w}px`; if (n.type === 'note' || n.type === 'mind' || n.type === 'whiteboard') el.style.height = `${n.h + 42}px`;
+    el.style.left = `${n.x}px`; el.style.top = `${n.y}px`; el.style.width = `${n.w}px`;
+    if (n.type === 'mind') el.style.height = `${n.h}px`;
+    else if (n.type === 'note' || n.type === 'whiteboard') el.style.height = `${n.h + 42}px`;
   }
   scheduleMove(e) {
     if (!this.drag || e.pointerId !== this.drag.pointerId) return;
@@ -4516,6 +4697,20 @@ class AtlasView extends TextFileView {
       if (Math.hypot(dx, dy) <= 4) return;
       const grouped = d.node && this.board.groups?.some(g => this.groupContents(g).some(n => n.id === d.node.id));
       this.checkpoint(d.type === 'group' || grouped ? 'board' : 'content'); d.pendingCheckpoint = false;
+    }
+    if (d.type === 'draw') {
+      const pos = this.toWorld(e.clientX, e.clientY);
+      const points = d.stroke.points;
+      const last = points[points.length - 1];
+      if (!last || Math.hypot(pos.x - last.x, pos.y - last.y) >= 2) {
+        points.push(pos);
+        let pathD = `M ${points[0].x} ${points[0].y}`;
+        for (let i = 1; i < points.length; i++) {
+          pathD += ` L ${points[i].x} ${points[i].y}`;
+        }
+        d.element.setAttribute('d', pathD);
+      }
+      return;
     }
     if (d.type === 'pan') { this.board.camera.x = d.x + dx; this.board.camera.y = d.y + dy; this.camera(); return; }
     const dirtyEdges = new Set();
@@ -4546,6 +4741,12 @@ class AtlasView extends TextFileView {
     if (this.motionFrame !== null) { this.contentEl.ownerDocument.defaultView.cancelAnimationFrame(this.motionFrame); this.motionFrame = null; }
     if (this.pendingMotion) { const event = this.pendingMotion; this.pendingMotion = null; this.move(event); }
     if (this.drag) {
+      if (this.drag.type === 'draw') {
+        this.drag = null;
+        this.checkpoint('board');
+        this.changed();
+        return;
+      }
       if (this.drag.type === 'pin' && this.drag.moved) this.skipPinClick = this.drag.pin.id;
       const groupMove = this.drag.type === 'group';
       const movedNode = this.drag.node;
@@ -4567,7 +4768,7 @@ class AtlasView extends TextFileView {
     const p = point.pin && n.pins?.find(item => item.id === point.pin);
     if (p) return n.type === 'web' ? { x: n.x + n.w, y: n.y + 42 + Math.min(n.h - 20, 155 + n.pins.indexOf(p) * 36) } : { x: n.x + p.u * n.w, y: n.y + 42 + p.v * n.h };
     const right = !other || other.x >= n.x + n.w / 2;
-    return { x: n.x + (right ? n.w : 0), y: n.y + (n.type === 'mind' ? (n.h + 42) / 2 : 42 + n.h / 2) };
+    return { x: n.x + (right ? n.w : 0), y: n.y + (n.type === 'mind' ? (n.noteExpanded ? 20 : n.h / 2) : 42 + n.h / 2) };
   }
   /** Reuse SVG elements; dragging touches only the moved node's adjacent connectors. */
   drawEdges(nodeId) {
@@ -4983,7 +5184,9 @@ class AtlasView extends TextFileView {
     return result;
   }
   makeMindMap(title, body, position) {
-    const id = uid(); const root = { id, type: 'mind', mapId: id, parentId: '', path: '', title, body, color: COLORS[0], collapsed: false, x: position.x, y: position.y, w: 260, h: 150 };
+    const id = uid();
+    const w = Math.max(180, Math.min(260, (title.length || 10) * 8.5 + 90));
+    const root = { id, type: 'mind', mapId: id, parentId: '', path: '', title, body, color: COLORS[0], collapsed: false, x: position.x, y: position.y, w, h: 40 };
     this.board.nodes.push(root); return root;
   }
   addMindMap() {
@@ -5017,18 +5220,35 @@ class AtlasView extends TextFileView {
     const owner = this.noteMapOwners.get(mapId);
     if (owner) { root.x = owner.x; root.y = owner.y; root.w = owner.w; root.h = owner.h; }
     for (const node of this.board.nodes) if (node.mapId === mapId && node.visualAsChild && node.visualExpanded) { const target = this.board.nodes.find(n => n.id === node.linkedVisualRoot); if (target) { node.w = target.w; node.h = target.h; } }
+    for (const node of this.board.nodes) {
+      if (node.mapId === mapId && node.type === 'mind' && !node.visualExpanded && !node.relation) {
+        if (node.noteExpanded && node.path) {
+          node.h = Math.max(180, node.expandedHeight || 220);
+          node.w = Math.max(260, node.expandedWidth || 300);
+        } else {
+          const thumbUrl = node.path ? this.getMindNodeImage(node) : null;
+          if (thumbUrl) {
+            node.h = 125;
+            node.w = Math.max(180, Math.min(280, (node.title?.length || 10) * 8.5 + 90));
+          } else {
+            node.h = node.parentId ? 36 : 40;
+            node.w = Math.max(160, Math.min(280, (node.title?.length || 10) * 8.5 + 90));
+          }
+        }
+      }
+    }
     const order = [], stack = [root], seen = new Set();
     while (stack.length) { const n = stack.pop(); if (seen.has(n.id)) continue; seen.add(n.id); order.push(n); if (!n.collapsed) stack.push(...(this.mindChildren.get(n.id) || [])); }
-    const spans = new Map(), gap = 28, column = Math.max(...order.map(n => n.w)) + 90;
+    const spans = new Map(), gap = 16, column = Math.max(180, Math.min(260, Math.max(...order.map(n => n.w)))) + 70;
     for (let i = order.length - 1; i >= 0; i--) {
       const n = order[i], children = n.collapsed ? [] : this.mindChildren.get(n.id) || [];
-      const total = children.reduce((sum, child) => sum + (spans.get(child.id) || child.h + 42), 0) + Math.max(0, children.length - 1) * gap;
-      spans.set(n.id, Math.max(n.h + 42, total));
+      const total = children.reduce((sum, child) => sum + (spans.get(child.id) || child.h), 0) + Math.max(0, children.length - 1) * gap;
+      spans.set(n.id, Math.max(n.h, total));
     }
-    const positions = [{ node: root, depth: 0, top: root.y + (root.h + 42) / 2 - spans.get(root.id) / 2 }];
+    const positions = [{ node: root, depth: 0, top: root.y + root.h / 2 - spans.get(root.id) / 2 }];
     while (positions.length) {
       const { node: n, depth, top } = positions.pop();
-      if (depth) { n.x = root.x + depth * column; n.y = top + (spans.get(n.id) - n.h - 42) / 2; }
+      if (depth) { n.x = root.x + depth * column; n.y = top + (spans.get(n.id) - n.h) / 2; }
       const children = n.collapsed ? [] : this.mindChildren.get(n.id) || [];
       const total = children.reduce((sum, child) => sum + spans.get(child.id), 0) + Math.max(0, children.length - 1) * gap;
       let y = top + (spans.get(n.id) - total) / 2;
@@ -5079,7 +5299,7 @@ class AtlasView extends TextFileView {
     if (parent.type !== 'mind') throw new Error('A nota vinculada não foi encontrada. Vincule uma nota existente antes de adicionar filhos a esse cartão.');
     this.checkpoint(); parent.collapsed = false;
     const color = parent.parentId ? parent.color : COLORS[(this.board.nodes.filter(n => n.parentId === parent.id).length + 1) % COLORS.length];
-    const child = { id: uid(), type: 'mind', mapId: parent.mapId, parentId: parent.id, path: '', title: relation ? 'Nova relação' : 'Novo tópico', body: '', color, collapsed: false, x: parent.x + 350, y: parent.y, w: relation ? 180 : 240, h: relation ? 4 : 130 };
+    const child = { id: uid(), type: 'mind', mapId: parent.mapId, parentId: parent.id, path: '', title: relation ? 'Nova relação' : 'Novo tópico', body: '', color, collapsed: false, x: parent.x + 280, y: parent.y, w: relation ? 160 : 190, h: relation ? 28 : 36 };
     if (noteFile) { child.path = noteFile.path; child.title = noteFile.basename; }
     if (relation) child.relation = true;
     if (sibling) this.board.nodes.splice(this.board.nodes.indexOf(node) + 1, 0, child); else this.board.nodes.push(child);
@@ -5228,6 +5448,7 @@ class AtlasView extends TextFileView {
     if (node.parentId) action('Mover ramo para outro pai', 'git-pull-request-arrow', () => this.beginMindReparent(node));
     menu.addSeparator();
     if (!node.relation) {
+      if (node.path) action(node.noteExpanded ? 'Recolher nota no mapa' : 'Expandir nota no mapa', node.noteExpanded ? 'chevrons-down-up' : 'chevrons-up-down', () => this.toggleMindNoteExpanded(node));
       action(node.path ? 'Abrir nota' : 'Criar nota · Ctrl+Shift+Enter', 'file-text', () => node.path ? this.openNote(node.path) : this.convertMindNote(node, { open: false }));
       if (node.path && node.parentId) action('Criar mapa mental desta nota', 'git-fork', () => this.toggleNoteMindMap(node));
       if (!node.relation) { action('Colar imagem nesta nota ou nó', 'clipboard-paste', () => new MapImageModal(this, node, true).open()); if (node.path) action('Colar link nesta nota', 'link', () => this.app.noteMedia.pickForNode(this, node)); }

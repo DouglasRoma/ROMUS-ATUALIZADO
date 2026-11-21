@@ -1,7 +1,7 @@
 {
   "name": "image-atlas-desktop",
   "productName": "ROMUS",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Whiteboards, mapas mentais, notas Markdown e revisão FSRS local.",
   "author": "Douglas",
   "private": true,
