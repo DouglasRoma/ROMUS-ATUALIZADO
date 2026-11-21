@@ -3907,6 +3907,35 @@ class AtlasView extends TextFileView {
     this.edgesEl = this.world.createDiv({ cls: 'ia-edges' });
     this.nodesEl = this.world.createDiv({ cls: 'ia-nodes' });
     this.webLayer = this.viewport.createDiv({ cls: 'ia-web-layer' });
+    const canvasZoom = this.viewport.createDiv({ cls: 'ia-canvas-zoom' });
+    canvasZoom.onpointerdown = e => e.stopPropagation();
+    canvasZoom.onclick = e => e.stopPropagation();
+    const zoomOut = canvasZoom.createEl('button', { cls: 'ia-canvas-zoom-btn', attr: { title: 'Diminuir zoom (-)', 'aria-label': 'Diminuir zoom' } });
+    setIcon(zoomOut, 'minus');
+    zoomOut.onclick = () => {
+      const r = this.viewport.getBoundingClientRect();
+      this.zoom(1 / 1.25, r.width / 2, r.height / 2);
+    };
+    const zoomLabelBtn = this.canvasZoomLabel = canvasZoom.createEl('button', { cls: 'ia-canvas-zoom-label', attr: { title: 'Redefinir para 100% (Ctrl+0)', 'aria-label': 'Redefinir zoom' } });
+    zoomLabelBtn.textContent = `${Math.round(this.board.camera.z * 100)}%`;
+    zoomLabelBtn.onclick = () => {
+      const c = this.board.camera, r = this.viewport.getBoundingClientRect();
+      const cx = r.width / 2, cy = r.height / 2;
+      c.x = cx - (cx - c.x) * (1 / c.z);
+      c.y = cy - (cy - c.y) * (1 / c.z);
+      c.z = 1;
+      this.camera();
+      this.changed(false, false);
+    };
+    const zoomIn = canvasZoom.createEl('button', { cls: 'ia-canvas-zoom-btn', attr: { title: 'Aumentar zoom (+)', 'aria-label': 'Aumentar zoom' } });
+    setIcon(zoomIn, 'plus');
+    zoomIn.onclick = () => {
+      const r = this.viewport.getBoundingClientRect();
+      this.zoom(1.25, r.width / 2, r.height / 2);
+    };
+    const zoomFit = canvasZoom.createEl('button', { cls: 'ia-canvas-zoom-btn', attr: { title: 'Enquadrar / Ajustar à tela', 'aria-label': 'Enquadrar à tela' } });
+    setIcon(zoomFit, 'scan');
+    zoomFit.onclick = () => this.fit();
     this.sidebar = body.createDiv({ cls: 'ia-sidebar' }); this.sidebar.hidden = !this.sidebarOpen;
     const sidebarHead = this.sidebar.createDiv({ cls: 'ia-sidebar-head' });
     sidebarHead.createSpan({ text: 'Detalhes do quadro' });
@@ -3965,7 +3994,38 @@ class AtlasView extends TextFileView {
       if (mind && !e.ctrlKey && !e.metaKey && !e.altKey && !e.target.closest('input,textarea,select,[contenteditable=true]')) {
         if (e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); if (ownMap) ownMap.pinHidden = false; if (e.shiftKey) this.addMindNoteChild(mind); else this.addMindNode(mind); return; }
         if (e.key === 'Enter') { e.preventDefault(); this.addMindNode(mind, true); return; }
-        if (e.key === 'F2') { e.preventDefault(); this.renameMindInline(mind); return; }
+        if (e.key === 'F2' || e.key === ' ') { e.preventDefault(); this.renameMindInline(mind); return; }
+        if (e.key.length === 1 && mind.type === 'mind') {
+          e.preventDefault();
+          this.renameMindInline(mind, true);
+          if (this.inlineRename?.input) this.inlineRename.input.value = e.key;
+          return;
+        }
+      }
+      if (!e.target.closest('input,textarea,select,[contenteditable=true]')) {
+        if (e.key === '+' || e.key === '=') {
+          e.preventDefault();
+          const r = this.viewport.getBoundingClientRect();
+          this.zoom(1.25, r.width / 2, r.height / 2);
+          return;
+        }
+        if (e.key === '-' || e.key === '_') {
+          e.preventDefault();
+          const r = this.viewport.getBoundingClientRect();
+          this.zoom(1 / 1.25, r.width / 2, r.height / 2);
+          return;
+        }
+        if (e.key === '0' && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault();
+          const c = this.board.camera, r = this.viewport.getBoundingClientRect();
+          const cx = r.width / 2, cy = r.height / 2;
+          c.x = cx - (cx - c.x) * (1 / c.z);
+          c.y = cy - (cy - c.y) * (1 / c.z);
+          c.z = 1;
+          this.camera();
+          this.changed(false, false);
+          return;
+        }
       }
       if (e.key === 'Escape') { this.pendingMindMove = null; this.pendingAreaPin = null; this.pendingMapPin = null; this.multiSelection?.clear(); this.selectedGroup = null; this.mode = 'select'; this.source = null; this.render(); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g' && !e.target.closest('input,textarea,select,[contenteditable=true]')) { e.preventDefault(); this.createGroup(); }
@@ -4219,6 +4279,7 @@ class AtlasView extends TextFileView {
     }
     for (const n of this.webNodes || []) { const el = this.nodeElements?.get(n.id); if (el) this.place(el, n); }
     if (this.zoomLabel) this.zoomLabel.textContent = `${Math.round(c.z * 100)}%`;
+    if (this.canvasZoomLabel) this.canvasZoomLabel.textContent = `${Math.round(c.z * 100)}%`;
     const detail = c.z >= .35;
     if (this.notePreviewDetail !== detail) {
       this.notePreviewDetail = detail;
@@ -4798,11 +4859,58 @@ class AtlasView extends TextFileView {
       if (this.drag.type === 'pin' && this.drag.moved) this.skipPinClick = this.drag.pin.id;
       const groupMove = this.drag.type === 'group';
       const movedNode = this.drag.node;
+      const dragType = this.drag.type;
+      const dragStartX = this.drag.x;
+      const dragStartY = this.drag.y;
       const groupedMove = movedNode && (this.drag.type === 'node' || this.drag.type === 'resize') && this.board.groups?.some(g => this.groupContents(g).some(n => n.id === movedNode.id));
       // Position and size are board-local; only moving a pin edits note content.
       const visual = this.drag.type === 'pin';
       const proxy = this.drag.type === 'resize' && this.board.nodes.find(n => n.id === this.drag.node.visualChildOf);
       this.drag = null; if (proxy) { this.layoutMind(proxy.mapId); this.render(); }
+      if (dragType === 'node' && movedNode?.type === 'mind') {
+        const movedDist = Math.hypot(movedNode.x - dragStartX, movedNode.y - dragStartY);
+        if (movedDist > 10) {
+          if (movedNode.parentId) {
+            const dropX = movedNode.x + movedNode.w / 2;
+            const dropY = movedNode.y + movedNode.h / 2;
+            const target = this.board.nodes.find(t =>
+              t.type === 'mind' &&
+              t.id !== movedNode.id &&
+              t.mapId === movedNode.mapId &&
+              !this.mindBranch(movedNode).some(b => b.id === t.id) &&
+              dropX >= t.x - 30 && dropX <= t.x + t.w + 30 &&
+              dropY >= t.y - 18 && dropY <= t.y + t.h + 18
+            );
+            if (target && target.id !== movedNode.parentId) {
+              this.reparentMindNode(movedNode, target);
+              return;
+            }
+            const parent = this.board.nodes.find(n => n.id === movedNode.parentId);
+            if (parent) {
+              const siblings = this.board.nodes.filter(n => n.type === 'mind' && n.parentId === parent.id);
+              if (siblings.length > 1) {
+                const sorted = [...siblings].sort((a, b) => a.y - b.y);
+                const currentOrder = siblings.map(s => s.id).join(',');
+                const newOrder = sorted.map(s => s.id).join(',');
+                if (currentOrder !== newOrder) {
+                  this.checkpoint();
+                  for (const s of sorted) {
+                    const idx = this.board.nodes.indexOf(s);
+                    if (idx !== -1) this.board.nodes.splice(idx, 1);
+                  }
+                  const parentIdx = this.board.nodes.indexOf(parent);
+                  this.board.nodes.splice(parentIdx + 1, 0, ...sorted);
+                }
+              }
+            }
+          }
+          this.checkpoint();
+          this.layoutMind(movedNode.mapId);
+          this.changed();
+          this.render();
+          return;
+        }
+      }
       if (groupedMove) { this.drawEdges(); this.drawGroups(); }
       if (groupMove || groupedMove) this.rememberVisualLayout();
       this.changed(false, visual);
@@ -5379,25 +5487,43 @@ class AtlasView extends TextFileView {
     this.board.edges.push({ id: uid(), from: { node: parent.id }, to: { node: child.id }, color, mindTree: true });
     this.layoutMind(parent.mapId); this.selected = { node: child.id }; this.changed(true); this.render(); this.focusNode(child);
     if (noteFile) this.plugin.visualSource(noteFile).then(source => { if (source && this.board.nodes.includes(child)) { child.visualAsChild = true; this.toggleLinkedVisual(child); } }).catch(error => new Notice(error.message));
-    else this.renameMindInline(child, true);
+    else setTimeout(() => { if (this.board?.nodes.includes(child)) this.renameMindInline(child, true); }, 20);
     return child;
     } catch (error) { new Notice(`Não foi possível adicionar o filho: ${error.message}`); }
   }
   renameMindInline(node, fresh = false) {
     this.inlineRename?.finish();
-    const head = this.nodeElements.get(node.id)?.querySelector('.ia-card-head'), label = head?.querySelector('.ia-card-title');
+    const card = this.nodeElements.get(node.id);
+    const head = card?.querySelector('.ia-card-head'), label = head?.querySelector('.ia-card-title');
     if (!head || !label) return;
-    const board = this.board, original = node.title; label.style.display = 'none';
-    const input = head.createEl('input', { cls: 'ia-mind-rename', type: 'text', value: original, attr: { 'aria-label': 'Título do nó' } });
+    card.classList.add('is-renaming');
+    const board = this.board, original = node.title || '';
+    label.style.display = 'none';
+    const initialValue = fresh ? '' : original;
+    const input = head.createEl('input', { cls: 'ia-mind-rename', type: 'text', value: initialValue, attr: { 'aria-label': 'Título do nó', placeholder: original || 'Novo tópico' } });
     let done = false;
     const finish = (cancel = false, silent = false) => {
       if (done) return; done = true;
+      card.classList.remove('is-renaming');
       const current = this.board === board ? board.nodes.find(n => n.id === node.id && n.type === 'mind') : null;
       if (!cancel && current) {
-        const title = input.value.trim() || original;
-        if (title !== current.title) { if (!fresh) this.checkpoint(); current.title = title; this.changed(); }
+        const title = input.value.trim() || (fresh ? (original || 'Novo tópico') : original);
+        if (title !== current.title) {
+          if (!fresh) this.checkpoint();
+          current.title = title;
+          current.w = Math.max(185, Math.min(420, current.title.length * 9.5 + 130));
+          this.layoutMind(current.mapId);
+          this.changed();
+          this.render();
+          input.remove();
+          this.inlineRename = null;
+          return;
+        }
       }
-      label.textContent = current?.title || node.title; label.style.display = ''; input.remove(); this.inlineRename = null;
+      label.textContent = current?.title || node.title;
+      label.style.display = '';
+      input.remove();
+      this.inlineRename = null;
       if (!silent && this.panel?.isConnected && this.selected?.node === node.id) this.showSelection();
     };
     this.inlineRename = {
@@ -5408,6 +5534,7 @@ class AtlasView extends TextFileView {
     };
     input.onpointerdown = event => event.stopPropagation();
     input.onclick = event => event.stopPropagation();
+    input.ondblclick = event => event.stopPropagation();
     input.onkeydown = event => {
       event.stopPropagation();
       if (event.isComposing) return;
@@ -5415,11 +5542,36 @@ class AtlasView extends TextFileView {
         event.preventDefault(); finish(); const current = this.board === board && board.nodes.find(n => n.id === node.id);
         if (current) this.convertMindNote(current, { open: false }); return;
       }
-      if (event.key === 'Tab') { event.preventDefault(); finish(); if (event.shiftKey) this.addMindNoteChild(node); else this.addMindNode(node); }
-      else if (event.key === 'Enter') { event.preventDefault(); finish(); if (node.parentId) this.addMindNode(node, true); else this.viewport.focus(); }
-      else if (event.key === 'Escape') { event.preventDefault(); finish(true); this.viewport.focus(); }
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        finish();
+        if (event.shiftKey) this.addMindNoteChild(node);
+        else this.addMindNode(node);
+      }
+      else if (event.key === 'Enter') {
+        event.preventDefault();
+        finish();
+        if (node.parentId) this.addMindNode(node, true);
+        else this.viewport.focus();
+      }
+      else if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(true);
+        this.viewport.focus();
+      }
     };
-    input.onblur = () => finish(); input.focus(); input.select();
+    input.onblur = () => {
+      setTimeout(() => {
+        if (!done && document.activeElement !== input) finish();
+      }, 50);
+    };
+    const setFocus = () => {
+      if (!input.isConnected) return;
+      input.focus();
+      if (!fresh) input.select();
+    };
+    setFocus();
+    setTimeout(setFocus, 20);
   }
   editMind(node) {
     new MindTextModal(this, node.title, node.body, (title, body) => { if (!this.board.nodes.includes(node)) return; this.checkpoint(); node.title = title; if (!node.path) node.body = body; this.changed(); this.render(); }, Boolean(node.path)).open();
