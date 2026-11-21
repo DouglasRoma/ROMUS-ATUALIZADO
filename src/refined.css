@@ -765,7 +765,7 @@ a.romus-cloze-editor-pill[data-has-tag="true"]::before{content:'🎴 ' attr(data
   opacity: 0.85;
 }
 
-/* Mind Map Inline Rename */
+/* Mind Node Inline Rename */
 .ia-mind-rename {
   flex: 1 1 auto !important;
   min-width: 60px !important;
@@ -784,17 +784,89 @@ a.romus-cloze-editor-pill[data-has-tag="true"]::before{content:'🎴 ' attr(data
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--ia-mind-color, #38bdf8) 25%, transparent) !important;
   box-sizing: border-box !important;
 }
+.ia-mind-rename.ia-relation-rename {
+  font-size: 11.5px !important;
+  height: 20px !important;
+  line-height: 20px !important;
+  padding: 0 6px !important;
+  min-width: 60px !important;
+  border-radius: 8px !important;
+}
 .ia-mind-rename::placeholder {
   color: var(--text-muted, #94a3b8) !important;
   opacity: 0.65 !important;
   font-weight: 500 !important;
 }
 .ia-card.ia-mind.is-renaming .ia-card-title,
+.ia-card.ia-mind.is-renaming .ia-relation-label,
 .ia-card.ia-mind.is-renaming .ia-mind-note-badge,
 .ia-card.ia-mind.is-renaming .ia-mind-add-btn,
 .ia-card.ia-mind.is-renaming .ia-mind-collapse-btn,
 .ia-card.ia-mind.is-renaming .ia-node-menu {
   display: none !important;
+}
+
+/* Mind Node with Subnote / Text Box */
+.ia-card.ia-mind.has-subnote {
+  flex-direction: column !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+  border-radius: 16px !important;
+  height: auto !important;
+  overflow: hidden !important;
+}
+.ia-card.ia-mind.has-subnote > .ia-card-head {
+  height: 36px !important;
+  flex: none !important;
+  border-radius: 16px 16px 0 0 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: rgba(0, 0, 0, 0.12) !important;
+  padding: 0 10px 0 14px !important;
+}
+.ia-card.ia-mind .ia-mind-subnote {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 auto !important;
+  padding: 8px 14px 10px 14px !important;
+  background: transparent !important;
+  border-radius: 0 0 16px 16px !important;
+  cursor: pointer !important;
+  overflow-y: auto !important;
+  user-select: text !important;
+  transition: background 0.15s ease !important;
+}
+.ia-card.ia-mind .ia-mind-subnote:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+.ia-card.ia-mind .ia-mind-subnote-text {
+  font-size: 12px !important;
+  line-height: 1.55 !important;
+  color: var(--text-muted, #9da5b4) !important;
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  margin: 0 !important;
+}
+.ia-card.ia-mind.is-selected .ia-mind-subnote-text {
+  color: var(--text-normal, #e0e0e0) !important;
+}
+
+/* Subnote modal textarea */
+.ia-mind-subnote-textarea {
+  width: 100% !important;
+  min-height: 120px !important;
+  border-radius: 8px !important;
+  background: var(--background-primary, #18191d) !important;
+  border: 1px solid var(--background-modifier-border, #333) !important;
+  padding: 10px 12px !important;
+  font-size: 13px !important;
+  line-height: 1.6 !important;
+  color: var(--text-normal, #fff) !important;
+  box-sizing: border-box !important;
+  resize: vertical !important;
+}
+.ia-mind-subnote-textarea:focus {
+  border-color: var(--text-accent, #38bdf8) !important;
+  outline: none !important;
 }
 
 /* Floating Whiteboard Canvas Zoom Controls */

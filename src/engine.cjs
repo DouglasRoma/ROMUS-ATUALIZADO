@@ -1961,7 +1961,8 @@ function parseBoard(raw) {
   const ids = new Set();
   const flashIds = new Set();
   for (const n of b.nodes) {
-    if (!n || !['image', 'note', 'web', 'mind', 'whiteboard'].includes(n.type) || typeof n.id !== 'string' || ids.has(n.id) || typeof n.path !== 'string' || ![n.x, n.y, n.w, n.h].every(finite) || n.w < 80 || n.h <= 0) throw new Error('Cartão inválido no quadro.');
+    const minW = n?.relation ? 24 : (n?.type === 'mind' ? 60 : 80);
+    if (!n || !['image', 'note', 'web', 'mind', 'whiteboard'].includes(n.type) || typeof n.id !== 'string' || ids.has(n.id) || typeof n.path !== 'string' || ![n.x, n.y, n.w, n.h].every(finite) || n.w < minW || n.h <= 0) throw new Error('Cartão inválido no quadro.');
     if (n.type === 'whiteboard' && !n.path.endsWith('.imageboard')) throw new Error('Referência de whiteboard inválida.');
     ids.add(n.id);
     if (n.visualIdentity !== undefined) {
@@ -3265,6 +3266,150 @@ class MindTextModal extends Modal {
   }
 }
 
+class MindSubnoteModal extends Modal {
+  constructor(view, node) {
+    super(view.app);
+    this.view = view;
+    this.board = view.board;
+    this.node = node;
+  }
+  onOpen() {
+    this.setTitle(this.node.body ? 'Editar subnota / caixa de texto' : 'Adicionar subnota / caixa de texto');
+    this.contentEl.addClass('ia-pin-modal');
+    this.contentEl.createEl('p', {
+      cls: 'ia-muted',
+      text: `Nó: “${this.node.title || 'Nó'}”. Escreva anotações ou explicações complementares dentro deste nó. Pressione Ctrl+Enter para salvar.`
+    });
+    const textarea = this.contentEl.createEl('textarea', {
+      cls: 'ia-mind-subnote-textarea',
+      attr: {
+        rows: '6',
+        placeholder: 'Escreva anotações, explicações ou detalhes adicionais...'
+      }
+    });
+    textarea.value = this.node.body || '';
+
+    const footer = this.contentEl.createDiv({ cls: 'ia-modal-footer' });
+    footer.style.display = 'flex';
+    footer.style.justifyContent = 'space-between';
+    footer.style.alignItems = 'center';
+    footer.style.marginTop = '14px';
+
+    const left = footer.createDiv();
+    if (this.node.body) {
+      const del = left.createEl('button', { cls: 'ia-btn-danger', text: 'Remover subnota' });
+      del.onclick = () => {
+        if (this.view.board === this.board && this.board.nodes.includes(this.node)) {
+          this.view.checkpoint();
+          this.node.body = '';
+          const target = this.view.mindNodeSize(this.node);
+          this.node.w = target.w;
+          this.node.h = target.h;
+          this.view.layoutMind(this.node.mapId);
+          this.view.changed(true);
+          this.view.render();
+        }
+        this.close();
+      };
+    }
+
+    const right = footer.createDiv();
+    right.style.display = 'flex';
+    right.style.gap = '8px';
+    const cancel = right.createEl('button', { text: 'Cancelar' });
+    cancel.onclick = () => this.close();
+    const save = right.createEl('button', { text: 'Salvar', cls: 'mod-cta' });
+    const commit = () => {
+      if (this.view.board !== this.board || !this.view.file || !this.board.nodes.includes(this.node)) {
+        this.close();
+        return;
+      }
+      const val = textarea.value.trim();
+      if (val !== this.node.body) {
+        this.view.checkpoint();
+        this.node.body = val;
+        const target = this.view.mindNodeSize(this.node);
+        this.node.w = target.w;
+        this.node.h = target.h;
+        this.view.layoutMind(this.node.mapId);
+        this.view.changed(true);
+        this.view.render();
+      }
+      this.close();
+    };
+    save.onclick = commit;
+    textarea.onkeydown = e => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        commit();
+      }
+    };
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    }, 30);
+  }
+}
+
+class RelationRenameModal extends Modal {
+  constructor(view, node) {
+    super(view.app);
+    this.view = view;
+    this.board = view.board;
+    this.node = node;
+  }
+  onOpen() {
+    this.setTitle('Renomear relação');
+    this.contentEl.addClass('ia-pin-modal');
+    this.contentEl.createEl('p', {
+      cls: 'ia-muted',
+      text: 'Digite o rótulo do conector entre os tópicos (ex.: Causa, Relação, Sintomas, Tipos).'
+    });
+    const input = this.contentEl.createEl('input', {
+      type: 'text',
+      cls: 'ia-mind-rename',
+      value: this.node.title || 'Relação',
+      attr: { placeholder: 'Relação' }
+    });
+    input.style.width = '100%';
+    input.style.marginTop = '8px';
+
+    const footer = this.contentEl.createDiv({ cls: 'ia-modal-footer' });
+    footer.style.display = 'flex';
+    footer.style.justifyContent = 'flex-end';
+    footer.style.gap = '8px';
+    footer.style.marginTop = '14px';
+
+    const cancel = footer.createEl('button', { text: 'Cancelar' });
+    cancel.onclick = () => this.close();
+    const save = footer.createEl('button', { text: 'Salvar', cls: 'mod-cta' });
+    const commit = () => {
+      if (this.view.board !== this.board || !this.view.file || !this.board.nodes.includes(this.node)) {
+        this.close();
+        return;
+      }
+      const val = input.value.trim() || 'Relação';
+      if (val !== this.node.title) {
+        this.view.checkpoint();
+        this.node.title = val;
+        this.view.sizeRelationLabels(this.node.mapId);
+        this.view.layoutMind(this.node.mapId);
+        this.view.changed(true);
+        this.view.render();
+      }
+      this.close();
+    };
+    save.onclick = commit;
+    input.onkeydown = e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commit();
+      }
+    };
+    setTimeout(() => { input.focus(); input.select(); }, 30);
+  }
+}
+
 class PinActionModal extends Modal {
   constructor(view, image, pin) { super(view.app); this.view = view; this.image = image; this.pin = pin; }
   onOpen() {
@@ -4398,23 +4543,67 @@ class AtlasView extends TextFileView {
     }
     return null;
   }
+  measureTextWidth(text, fontSpec = '600 13px') {
+    const doc = this.contentEl?.ownerDocument;
+    if (!this.textMeasure && doc) {
+      this.textMeasure = doc.createElement('canvas').getContext('2d');
+    }
+    if (this.textMeasure) {
+      const baseFont = doc?.defaultView?.getComputedStyle(this.contentEl).fontFamily || 'sans-serif';
+      this.textMeasure.font = `${fontSpec} ${baseFont}`;
+      return this.textMeasure.measureText(text || '').width;
+    }
+    return (text?.length || 0) * 9;
+  }
+  mindNodeSize(node) {
+    if (node.relation) {
+      const text = node.title || 'Relação';
+      const textW = this.measureTextWidth(text, '600 12px');
+      return { w: Math.max(80, Math.min(320, Math.ceil(textW) + 32)), h: 26 };
+    }
+    if (node.noteExpanded && node.path) {
+      return {
+        w: Math.max(280, node.expandedWidth || 320),
+        h: Math.max(180, node.expandedHeight || 220)
+      };
+    }
+    const titleText = node.title || (node.parentId ? 'Novo tópico' : 'Mapa Mental');
+    const titleW = this.measureTextWidth(titleText, '600 13px');
+    const hasChildren = Boolean(this.mindChildren?.get(node.id)?.length);
+    const extraControls = (hasChildren ? 26 : 0) + 190;
+    const baseTitleW = Math.max(195, Math.ceil(titleW + extraControls));
+
+    if (node.body && !node.noteExpanded) {
+      const lines = String(node.body).split(/\r?\n/);
+      let maxLineW = 0;
+      for (const line of lines) {
+        const lw = this.measureTextWidth(line, '400 12px');
+        if (lw > maxLineW) maxLineW = lw;
+      }
+      const bodyW = Math.max(220, Math.min(560, Math.ceil(maxLineW) + 40));
+      const w = Math.min(850, Math.max(baseTitleW, bodyW));
+      const lineCount = lines.reduce((acc, l) => acc + Math.max(1, Math.ceil((l.length || 1) / 45)), 0);
+      const textH = Math.min(260, Math.max(34, lineCount * 20 + 16));
+      return { w, h: (node.parentId ? 36 : 40) + textH };
+    }
+
+    const thumbUrl = node.path ? this.getMindNodeImage(node) : null;
+    if (thumbUrl) {
+      return { w: Math.min(850, Math.max(210, baseTitleW)), h: 125 };
+    }
+
+    return {
+      w: Math.min(850, Math.max(185, baseTitleW)),
+      h: node.parentId ? 36 : 40
+    };
+  }
   toggleMindNoteExpanded(node) {
     if (!node || !node.path) return;
     this.checkpoint('board');
     node.noteExpanded = !node.noteExpanded;
-    if (node.noteExpanded) {
-      node.w = Math.max(260, node.expandedWidth || 300);
-      node.h = Math.max(180, node.expandedHeight || 220);
-    } else {
-      const thumbUrl = this.getMindNodeImage(node);
-      if (thumbUrl) {
-        node.h = 125;
-        node.w = Math.max(200, Math.min(420, (node.title?.length || 10) * 9.5 + 130));
-      } else {
-        node.h = node.parentId ? 36 : 40;
-        node.w = Math.max(185, Math.min(420, (node.title?.length || 10) * 9.5 + 130));
-      }
-    }
+    const target = this.mindNodeSize(node);
+    node.w = target.w;
+    node.h = target.h;
     this.layoutMind(node.mapId);
     this.selected = { node: node.id };
     this.changed();
@@ -4456,21 +4645,11 @@ class AtlasView extends TextFileView {
     for (const node of this.board.nodes) {
       if (node.type === 'mind' && !node.visualExpanded && !node.relation) {
         if (this.noteMapOwners?.has(node.id) || this.directVisualNodes?.has(node.id)) continue;
-        if (node.noteExpanded && node.path) {
-          const targetH = Math.max(180, node.expandedHeight || 220);
-          const targetW = Math.max(260, node.expandedWidth || 300);
-          if (node.h !== targetH || node.w !== targetW) { node.h = targetH; node.w = targetW; resizedMaps.add(node.mapId); }
-        } else {
-          const thumbUrl = node.path ? this.getMindNodeImage(node) : null;
-          if (thumbUrl) {
-            const targetH = 125;
-            const targetW = Math.max(200, Math.min(420, (node.title?.length || 10) * 9.5 + 130));
-            if (node.h !== targetH || node.w !== targetW) { node.h = targetH; node.w = targetW; resizedMaps.add(node.mapId); }
-          } else {
-            const targetH = node.parentId ? 36 : 40;
-            const targetW = Math.max(185, Math.min(420, (node.title?.length || 10) * 9.5 + 130));
-            if (node.h !== targetH || node.w !== targetW) { node.h = targetH; node.w = targetW; resizedMaps.add(node.mapId); }
-          }
+        const target = this.mindNodeSize(node);
+        if (node.h !== target.h || node.w !== target.w) {
+          node.h = target.h;
+          node.w = target.w;
+          resizedMaps.add(node.mapId);
         }
       }
     }
@@ -4630,7 +4809,17 @@ class AtlasView extends TextFileView {
           }
           head.innerHTML = '';
           const label = head.createSpan({ cls: 'ia-relation-label', text: n.title || 'Relação' });
-          label.title = 'Rótulo da linha · Dois cliques para renomear';
+          label.title = 'Rótulo da linha · Clique duas vezes ou use F2 para renomear';
+          label.onclick = e => {
+            e.stopPropagation();
+            this.selected = { node: n.id };
+            this.highlight();
+            this.showSelection();
+          };
+          label.ondblclick = e => {
+            e.stopPropagation();
+            this.renameMindInline(n);
+          };
           el.ondblclick = e => {
             e.stopPropagation();
             this.renameMindInline(n);
@@ -4640,6 +4829,12 @@ class AtlasView extends TextFileView {
             this.selected = { node: n.id };
             this.highlight();
             this.showSelection();
+          };
+          el.oncontextmenu = e => {
+            if (e.target.closest('input,textarea,a,[contenteditable=true]')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            this.showRelationMenu(n, e);
           };
           this.place(el, n);
           continue;
@@ -4744,6 +4939,26 @@ class AtlasView extends TextFileView {
           if (this.mode === 'connect') this.connect({ node: n.id });
           else { this.selected = { node: n.id }; this.highlight(); this.showSelection(); }
         };
+
+        if (!n.noteExpanded && n.body) {
+          el.classList.add('has-subnote');
+          const subnoteEl = el.createDiv({ cls: 'ia-mind-subnote' });
+          subnoteEl.title = 'Subnota / Caixa de texto · Clique duas vezes para editar';
+          const textEl = subnoteEl.createDiv({ cls: 'ia-mind-subnote-text' });
+          textEl.textContent = n.body;
+          subnoteEl.onclick = e => {
+            e.stopPropagation();
+            this.selected = { node: n.id };
+            this.highlight();
+            this.showSelection();
+          };
+          subnoteEl.ondblclick = e => {
+            e.stopPropagation();
+            this.editMindSubnote(n);
+          };
+        } else {
+          el.classList.remove('has-subnote');
+        }
 
         if (n.noteExpanded && n.path) {
           const noteEl = el.createDiv({ cls: 'ia-note-content' });
@@ -5396,7 +5611,7 @@ class AtlasView extends TextFileView {
         this.relationWidths.set(key, textWidth);
         if (this.relationWidths.size > 200) this.relationWidths.delete(this.relationWidths.keys().next().value);
       }
-      const width = Math.max(76, Math.min(260, Math.ceil(textWidth) + 26));
+      const width = Math.max(80, Math.min(320, Math.ceil(textWidth) + 32));
       const height = 26;
       if (node.w !== width || node.h !== height) { node.w = width; node.h = height; resized.add(node.mapId); }
     }
@@ -5413,19 +5628,9 @@ class AtlasView extends TextFileView {
         if (node === root && owner) continue;
         if (this.noteMapOwners?.has(node.id) || this.directVisualNodes?.has(node.id)) continue;
         if (node.visualAsChild && node.visualExpanded) continue;
-        if (node.noteExpanded && node.path) {
-          node.h = Math.max(180, node.expandedHeight || 220);
-          node.w = Math.max(260, node.expandedWidth || 300);
-        } else {
-          const thumbUrl = node.path ? this.getMindNodeImage(node) : null;
-          if (thumbUrl) {
-            node.h = 125;
-            node.w = Math.max(200, Math.min(420, (node.title?.length || 10) * 9.5 + 130));
-          } else {
-            node.h = node.parentId ? 36 : 40;
-            node.w = Math.max(185, Math.min(420, (node.title?.length || 10) * 9.5 + 130));
-          }
-        }
+        const target = this.mindNodeSize(node);
+        node.w = target.w;
+        node.h = target.h;
       }
     }
     const order = [], stack = [root], seen = new Set();
@@ -5514,9 +5719,12 @@ class AtlasView extends TextFileView {
     if (parent.type !== 'mind') throw new Error('A nota vinculada não foi encontrada. Vincule uma nota existente antes de adicionar filhos a esse cartão.');
     this.checkpoint(); parent.collapsed = false;
     const color = parent.parentId ? parent.color : COLORS[(this.board.nodes.filter(n => n.parentId === parent.id).length + 1) % COLORS.length];
-    const child = { id: uid(), type: 'mind', mapId: parent.mapId, parentId: parent.id, path: '', title: relation ? 'Nova relação' : 'Novo tópico', body: '', color, collapsed: false, x: parent.x + 280, y: parent.y, w: relation ? 160 : 190, h: relation ? 28 : 36 };
+    const child = { id: uid(), type: 'mind', mapId: parent.mapId, parentId: parent.id, path: '', title: relation ? 'Nova relação' : 'Novo tópico', body: '', color, collapsed: false, x: parent.x + 280, y: parent.y, w: relation ? 120 : 190, h: relation ? 26 : 36 };
     if (noteFile) { child.path = noteFile.path; child.title = noteFile.basename; }
     if (relation) child.relation = true;
+    const initialSize = this.mindNodeSize(child);
+    child.w = initialSize.w;
+    child.h = initialSize.h;
     if (sibling) this.board.nodes.splice(this.board.nodes.indexOf(node) + 1, 0, child); else this.board.nodes.push(child);
     this.board.edges.push({ id: uid(), from: { node: parent.id }, to: { node: child.id }, color, mindTree: true });
     this.layoutMind(parent.mapId); this.selected = { node: child.id }; this.changed(true); this.render(); this.focusNode(child);
@@ -5528,33 +5736,47 @@ class AtlasView extends TextFileView {
   renameMindInline(node, fresh = false) {
     this.inlineRename?.finish();
     const card = this.nodeElements.get(node.id);
-    const head = card?.querySelector('.ia-card-head'), label = head?.querySelector('.ia-card-title');
+    const head = card?.querySelector('.ia-card-head');
+    const label = head?.querySelector('.ia-card-title, .ia-relation-label');
     if (!head || !label) return;
     card.classList.add('is-renaming');
-    const board = this.board, original = node.title || '';
+    const board = this.board;
+    const original = node.title || (node.relation ? 'Relação' : '');
     label.style.display = 'none';
-    const initialValue = fresh ? '' : original;
-    const input = head.createEl('input', { cls: 'ia-mind-rename', type: 'text', value: initialValue, attr: { 'aria-label': 'Título do nó', placeholder: original || 'Novo tópico' } });
+    const initialValue = fresh ? '' : (node.relation && original === 'Relação' ? '' : original);
+    const placeholder = original || (node.relation ? 'Relação' : 'Novo tópico');
+    const input = head.createEl('input', {
+      cls: node.relation ? 'ia-mind-rename ia-relation-rename' : 'ia-mind-rename',
+      type: 'text',
+      value: initialValue,
+      attr: { 'aria-label': node.relation ? 'Rótulo da relação' : 'Título do nó', placeholder }
+    });
     let done = false;
     const finish = (cancel = false, silent = false) => {
       if (done) return; done = true;
       card.classList.remove('is-renaming');
       const current = this.board === board ? board.nodes.find(n => n.id === node.id && n.type === 'mind') : null;
       if (!cancel && current) {
-        const title = input.value.trim() || (fresh ? (original || 'Novo tópico') : original);
+        const title = input.value.trim() || (fresh ? placeholder : (current.relation ? 'Relação' : original));
         if (title !== current.title) {
           if (!fresh) this.checkpoint();
           current.title = title;
-          current.w = Math.max(185, Math.min(420, current.title.length * 9.5 + 130));
+          if (current.relation) {
+            this.sizeRelationLabels(current.mapId);
+          } else {
+            const size = this.mindNodeSize(current);
+            current.w = size.w;
+            current.h = size.h;
+          }
           this.layoutMind(current.mapId);
-          this.changed();
+          this.changed(true);
           this.render();
           input.remove();
           this.inlineRename = null;
           return;
         }
       }
-      label.textContent = current?.title || node.title;
+      label.textContent = current?.title || node.title || (node.relation ? 'Relação' : '');
       label.style.display = '';
       input.remove();
       this.inlineRename = null;
@@ -5585,7 +5807,7 @@ class AtlasView extends TextFileView {
       else if (event.key === 'Enter') {
         event.preventDefault();
         finish();
-        if (node.parentId) this.addMindNode(node, true);
+        if (node.parentId && !node.relation) this.addMindNode(node, true);
         else this.viewport.focus();
       }
       else if (event.key === 'Escape') {
@@ -5608,7 +5830,22 @@ class AtlasView extends TextFileView {
     setTimeout(setFocus, 20);
   }
   editMind(node) {
-    new MindTextModal(this, node.title, node.body, (title, body) => { if (!this.board.nodes.includes(node)) return; this.checkpoint(); node.title = title; if (!node.path) node.body = body; this.changed(); this.render(); }, Boolean(node.path)).open();
+    new MindTextModal(this, node.title, node.body, (title, body) => {
+      if (!this.board.nodes.includes(node)) return;
+      this.checkpoint();
+      node.title = title;
+      if (!node.path) node.body = body;
+      const target = this.mindNodeSize(node);
+      node.w = target.w;
+      node.h = target.h;
+      this.layoutMind(node.mapId);
+      this.changed(true);
+      this.render();
+    }, Boolean(node.path)).open();
+  }
+  editMindSubnote(node) {
+    if (!node || !this.board.nodes.includes(node)) return;
+    new MindSubnoteModal(this, node).open();
   }
   collapseMind(node) { this.checkpoint(); node.collapsed = !node.collapsed; this.layoutMind(node.mapId); this.selected = { node: node.id }; this.changed(false, false); this.render(); this.focusNode(node); }
   async createAtlasNote(title, body) {
@@ -5719,14 +5956,49 @@ class AtlasView extends TextFileView {
       } catch (error) { new Notice(`Não foi possível vincular a nota: ${error.message}`); }
     }, 'Vincular este nó a uma nota…').open();
   }
+  showRelationMenu(node, event, anchor) {
+    if (!this.board.nodes.includes(node)) return;
+    this.selectedGroup = null; this.selected = { node: node.id }; this.highlight();
+    const menu = new Menu();
+    const action = (title, icon, run) => menu.addItem(item => item.setTitle(title).setIcon(icon).onClick(() => { if (this.board.nodes.includes(node)) run(); }));
+    action('Renomear relação · F2', 'square-pen', () => this.renameMindInline(node));
+    action('Escrever rótulo...', 'pencil', () => this.promptRenameRelation(node));
+    action('+ Filho desta relação · Tab', 'plus', () => this.addMindNode(node));
+    action('+ Filho de nota existente · Shift+Tab', 'file-input', () => this.addMindNoteChild(node));
+    menu.addSeparator();
+    if (this.board.nodes.some(n => n.parentId === node.id)) {
+      action(node.collapsed ? 'Expandir filhos' : 'Recolher filhos', node.collapsed ? 'chevron-right' : 'chevron-down', () => this.collapseMind(node));
+    }
+    action('Remover relação e seus ramos', 'trash-2', () => this.removeNode(node));
+    if (anchor) { const r = anchor.getBoundingClientRect(); menu.showAtPosition({ x: r.left, y: r.bottom + 4 }); }
+    else menu.showAtMouseEvent(event);
+  }
+  promptRenameRelation(node) {
+    new RelationRenameModal(this, node).open();
+  }
   showMindMenu(node, event, anchor) {
     if (!this.board.nodes.includes(node)) return;
+    if (node.relation) { this.showRelationMenu(node, event, anchor); return; }
     this.selectedGroup = null; this.selected = { node: node.id }; this.highlight();
     const menu = new Menu();
     const action = (title, icon, run) => menu.addItem(item => item.setTitle(title).setIcon(icon).onClick(() => { if (this.board.nodes.includes(node)) run(); }));
     action('Adicionar filho · Tab', 'plus', () => this.addMindNode(node));
     action('Filho de nota existente · Shift+Tab', 'file-input', () => this.addMindNoteChild(node));
     if (node.parentId) action('Mover ramo para outro pai', 'git-pull-request-arrow', () => this.beginMindReparent(node));
+    menu.addSeparator();
+    action(node.body ? 'Editar subnota / caixa de texto' : 'Adicionar subnota / caixa de texto', 'file-text', () => this.editMindSubnote(node));
+    if (node.body) {
+      action('Remover subnota', 'trash-2', () => {
+        this.checkpoint();
+        node.body = '';
+        const target = this.mindNodeSize(node);
+        node.w = target.w;
+        node.h = target.h;
+        this.layoutMind(node.mapId);
+        this.changed(true);
+        this.render();
+      });
+    }
     menu.addSeparator();
     if (!node.relation) {
       if (node.path) {
@@ -5785,6 +6057,7 @@ class AtlasView extends TextFileView {
     this.button(this.panel, '+ Relação com vários filhos', 'git-branch', () => this.addMindNode(node, false, true));
     if (node.parentId) this.button(this.panel, '+ Irmão', 'git-fork', () => this.addMindNode(node, true));
     this.button(this.panel, node.path ? 'Renomear nó no mapa' : 'Editar título e texto do nó', 'square-pen', () => this.editMind(node));
+    this.button(this.panel, node.body ? 'Editar subnota / caixa de texto' : 'Adicionar subnota / caixa de texto', 'file-text', () => this.editMindSubnote(node));
     this.flashcardActions(node, this.panel);
     this.button(this.panel, 'Responder flashcards deste mapa', 'play', () => this.reviewFlashcards(node.mapId));
     if (node.path) { this.button(this.panel, 'Editar nota', 'file-text', () => this.openNote(node.path)); this.notePreview(node.path, this.panel.createDiv({ cls: 'ia-summary' })); }
