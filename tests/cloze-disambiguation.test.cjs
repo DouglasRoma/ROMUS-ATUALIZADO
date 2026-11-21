@@ -97,3 +97,21 @@ test('Whiteboard board drawings e grid persistem corretamente no quadro', () => 
   assert.equal(parsed.drawings[0].points.length, 2);
   assert.equal(parsed.grid, 'dots');
 });
+
+test('Whiteboard board drawings suporta pontos individuais e múltiplos traços', () => {
+  const rawBoard = JSON.stringify({
+    version: 1,
+    title: 'Quadro com Pontos',
+    nodes: [],
+    edges: [],
+    drawings: [
+      { id: 'dot-1', color: '#f43f5e', width: 4, points: [{ x: 50, y: 50 }] },
+      { id: 'stroke-1', color: '#4ade80', width: 2, points: [{ x: 10, y: 20 }, { x: 30, y: 40 }] }
+    ]
+  });
+
+  const parsed = JSON.parse(rawBoard);
+  assert.equal(parsed.drawings.length, 2);
+  assert.equal(parsed.drawings[0].points.length, 1);
+  assert.equal(parsed.drawings[1].points.length, 2);
+});

@@ -3951,6 +3951,9 @@ class AtlasView extends TextFileView {
         if (e.button !== 0) return;
         e.preventDefault(); e.stopPropagation();
         this.viewport.focus();
+        if (!this.drawSvg?.isConnected || this.drawSvg.parentElement !== this.drawingsEl) {
+          this.drawDrawings();
+        }
         const pos = this.toWorld(e.clientX, e.clientY);
         const strokeColor = this.drawColor || '#38bdf8';
         const strokeWidth = this.drawWidth || 3;
@@ -3966,9 +3969,10 @@ class AtlasView extends TextFileView {
         livePath.setAttribute('stroke-linecap', 'round');
         livePath.setAttribute('stroke-linejoin', 'round');
         livePath.setAttribute('vector-effect', 'non-scaling-stroke');
-        livePath.setAttribute('d', `M ${pos.x} ${pos.y}`);
+        livePath.setAttribute('d', `M ${pos.x} ${pos.y} L ${pos.x} ${pos.y}`);
         this.drawSvg?.appendChild(livePath);
         this.drag = { type: 'draw', stroke: currentStroke, element: livePath, pointerId: e.pointerId };
+        try { this.viewport.setPointerCapture(e.pointerId); } catch {}
         return;
       }
       if (e.target !== this.viewport && e.target !== this.world && e.target !== this.nodesEl && e.target !== this.edgesEl && e.target !== this.drawingsEl && !e.target.closest?.('.ia-draw-svg')) return;
@@ -4072,14 +4076,12 @@ class AtlasView extends TextFileView {
       this.drawingsEl.empty();
       this.drawSvg = doc.createElementNS(ns, 'svg');
       this.drawSvg.setAttribute('class', 'ia-draw-svg');
-      this.drawSvg.setAttribute('width', '100%');
-      this.drawSvg.setAttribute('height', '100%');
       this.drawingsEl.appendChild(this.drawSvg);
     }
     this.drawSvg.innerHTML = '';
     const drawings = Array.isArray(this.board.drawings) ? this.board.drawings : [];
     for (const stroke of drawings) {
-      if (!stroke.points || stroke.points.length < 2) continue;
+      if (!stroke.points || !stroke.points.length) continue;
       const path = doc.createElementNS(ns, 'path');
       path.setAttribute('class', 'ia-draw-stroke');
       path.setAttribute('fill', 'none');
@@ -4089,8 +4091,12 @@ class AtlasView extends TextFileView {
       path.setAttribute('stroke-linejoin', 'round');
       path.setAttribute('vector-effect', 'non-scaling-stroke');
       let d = `M ${stroke.points[0].x} ${stroke.points[0].y}`;
-      for (let i = 1; i < stroke.points.length; i++) {
-        d += ` L ${stroke.points[i].x} ${stroke.points[i].y}`;
+      if (stroke.points.length === 1) {
+        d += ` L ${stroke.points[0].x} ${stroke.points[0].y}`;
+      } else {
+        for (let i = 1; i < stroke.points.length; i++) {
+          d += ` L ${stroke.points[i].x} ${stroke.points[i].y}`;
+        }
       }
       path.setAttribute('d', d);
       this.drawSvg.appendChild(path);
@@ -4101,6 +4107,8 @@ class AtlasView extends TextFileView {
     this.drawingPalette = null;
     if (this.mode !== 'draw') return;
     const palette = this.drawingPalette = (body || this.contentEl.querySelector('.ia-body') || this.contentEl).createDiv({ cls: 'ia-drawing-palette' });
+    palette.onpointerdown = e => e.stopPropagation();
+    palette.onclick = e => e.stopPropagation();
     const colors = ['#ffffff', '#38bdf8', '#4ade80', '#fbbf24', '#f43f5e', '#a855f7'];
     this.drawColor = this.drawColor || '#38bdf8';
     this.drawWidth = this.drawWidth || 3;
@@ -4857,6 +4865,7 @@ class AtlasView extends TextFileView {
     if (this.pendingMotion) { const event = this.pendingMotion; this.pendingMotion = null; this.move(event); }
     if (this.drag) {
       if (this.drag.type === 'draw') {
+        try { if (this.viewport?.hasPointerCapture(this.drag.pointerId)) this.viewport.releasePointerCapture(this.drag.pointerId); } catch {}
         this.drag = null;
         this.checkpoint('board');
         this.changed();

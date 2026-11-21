@@ -46,7 +46,7 @@ export function decorateBoard(view) {
   const details=controls.get('Detalhes');if(details){details.classList.add('atlas-icon-button');toolbar.append(details)}
   const more=menu('Mais opções','ellipsis',['Buscar notas e mapas','Renomear whiteboard','Criar grupo','Colocar / retirar do grupo','Mostrar mapas existentes']);
   const dock=view.contentEl.querySelector('.ia-body').createDiv({cls:'atlas-canvas-tools',attr:{role:'toolbar','aria-label':'Ferramentas do quadro'}});
-  for(const label of ['Mover','Conectar','Alfinete','Área','Desfazer','Refazer','Enquadrar']){const button=controls.get(label);if(button){button.classList.add('atlas-icon-button');dock.append(button)}}
+  for(const label of ['Mover','Desenhar','Conectar','Alfinete','Área','Desfazer','Refazer','Enquadrar']){const button=controls.get(label);if(button){button.classList.add('atlas-icon-button');dock.append(button)}}
   const back=controls.get('Voltar ao quadro anterior');if(back){back.classList.add('atlas-icon-button');toolbar.insertBefore(back,title)}
   // Move the real controls once; keep their handlers, labels and engine state.
   const context=toolbar.createDiv({cls:'romus-board-context'});if(back)context.append(back);context.append(title);
@@ -68,7 +68,7 @@ function decorateNoteShortcuts(view){
   element.addEventListener('dblclick',event=>{if(node.mediaFile&&event.target.closest('.ia-card-head'))return;if(event.target.closest('button,a,input,textarea,.ia-resize,[contenteditable=true],.romus-card-editor'))return;if(node.type!=='note'&&!event.target.closest('.ia-note-content'))return;event.preventDefault();event.stopImmediatePropagation();view.editCardNote(node,event).catch(error=>new Notice(error.message))},true);
  }
 }
-function updateModes(view){for(const button of view.contentEl.querySelectorAll('.atlas-canvas-tools button')){const mode={'Mover':'select','Conectar':'connect','Alfinete':'pin','Área':'area'}[button.dataset.originalLabel];if(mode){button.classList.toggle('is-active',mode===view.mode);button.setAttribute('aria-pressed',String(mode===view.mode))}}}
+function updateModes(view){for(const button of view.contentEl.querySelectorAll('.atlas-canvas-tools button')){const mode={'Mover':'select','Desenhar':'draw','Conectar':'connect','Alfinete':'pin','Área':'area'}[button.dataset.originalLabel];if(mode){button.classList.toggle('is-active',mode===view.mode);button.setAttribute('aria-pressed',String(mode===view.mode))}}}
 
 export function installBoardAppearance(app){
   const original=app.factories.get('image-atlas-board');if(!original)return;

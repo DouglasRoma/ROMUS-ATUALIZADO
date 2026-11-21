@@ -249,6 +249,7 @@ kbd{font-family:var(--font-interface);border:1px solid var(--background-modifier
 /* The canvas owns the whole work area. Floating islands replace the old bar. */
 .ia-view{position:relative}
 .ia-toolbar[data-atlas-refined]{position:absolute;inset:15px 18px auto;min-height:0;padding:0;border:0;display:flex;justify-content:space-between;align-items:flex-start;gap:14px;background:transparent;pointer-events:none}
+.ia-toolbar[data-atlas-refined] > button{pointer-events:auto}
 .romus-board-context,.romus-board-actions{display:flex;align-items:center;gap:5px;padding:5px;border:1px solid var(--background-modifier-border);border-radius:13px;background:var(--background-primary);pointer-events:auto;box-shadow:0 3px 10px #0001;min-width:0}
 .romus-board-context .atlas-board-heading{padding:5px 9px;margin:0;min-height:32px}
 .romus-board-actions{flex:none}
