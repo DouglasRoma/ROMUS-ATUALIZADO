@@ -507,21 +507,25 @@ a.romus-cloze-editor-pill[data-has-tag="true"]::before{content:'🎴 ' attr(data
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
-  flex: 0 1 auto !important;
-  min-width: 0 !important;
+  flex: 1 1 auto !important;
+  min-width: 50px !important;
+  display: inline-block !important;
+}
+.ia-card.ia-mind .ia-note-study,
+.ia-card.ia-mind .ia-flash-badge,
+.ia-card.ia-mind .ia-count,
+.ia-card.ia-mind .ia-card-remove {
+  display: none !important;
 }
 .ia-card.ia-mind .ia-mind-add-btn,
 .ia-card.ia-mind .ia-node-menu {
-  opacity: 0 !important;
-  pointer-events: none !important;
-  transition: opacity 0.15s ease !important;
+  display: none !important;
 }
 .ia-card.ia-mind:hover .ia-mind-add-btn,
 .ia-card.ia-mind:hover .ia-node-menu,
 .ia-card.ia-mind.is-selected .ia-mind-add-btn,
 .ia-card.ia-mind.is-selected .ia-node-menu {
-  opacity: 1 !important;
-  pointer-events: auto !important;
+  display: inline-flex !important;
 }
 .ia-card.ia-mind .ia-mind-note-badge {
   display: inline-flex !important;

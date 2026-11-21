@@ -4463,7 +4463,8 @@ class AtlasView extends TextFileView {
       this.nodeElements.set(n.id, el); this.place(el, n);
       const head = el.createDiv({ cls: 'ia-card-head' });
       if (el.firstChild !== head) el.insertBefore(head, el.firstChild);
-      const cardTitle = head.createSpan({ text: n.title || n.path.split('/').pop().replace(/\.md$/, ''), cls: 'ia-card-title' });
+      const titleText = (n.title && n.title.trim()) || (n.path ? n.path.split('/').pop().replace(/\.md$/, '') : '') || (n.type === 'mind' ? 'Tópico' : 'Sem título');
+      const cardTitle = head.createSpan({ text: titleText, cls: 'ia-card-title' });
       if (n.type === 'image') {
         cardTitle.style.cursor = 'pointer'; cardTitle.tabIndex = 0; cardTitle.setAttribute('role', 'button');
         cardTitle.title = 'Criar, expandir ou ocultar o mapa mental desta nota · Ctrl: prévia da nota';
@@ -4471,7 +4472,7 @@ class AtlasView extends TextFileView {
         cardTitle.onclick = e => { e.stopPropagation(); if (!this.previewImageNote(e)) this.toggleImageMindMap(n); };
         cardTitle.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); this.toggleImageMindMap(n); } };
       }
-      if (n.flashcards?.length) head.createSpan({ cls: 'ia-flash-badge', text: `${n.flashcards.length} FC`, attr: { title: 'Flashcards deste nó' } });
+      if (n.flashcards?.length && n.type !== 'mind') head.createSpan({ cls: 'ia-flash-badge', text: `${n.flashcards.length} FC`, attr: { title: 'Flashcards deste nó' } });
       if (n.pins) head.createSpan({ text: `${n.pins.filter(p => !p.imageMap).length} pontos`, cls: 'ia-count' });
       if (n.visualChildOf) {
         const parent = this.board.nodes.find(node => node.id === n.visualChildOf);
@@ -4490,7 +4491,7 @@ class AtlasView extends TextFileView {
           toggle.onpointerdown = e => e.stopPropagation();
         }
       }
-      if (noteFlashcardPath(n) && !n.relation) {
+      if (noteFlashcardPath(n) && !n.relation && n.type !== 'mind') {
         const studyNote = this.button(head, 'Estudar nota', 'play', () => this.reviewNoteFlashcards(n));
         studyNote.addClass('ia-note-study'); studyNote.title = 'Responder flashcards desta nota'; studyNote.onpointerdown = event => event.stopPropagation(); studyNote.onclick = event => { event.stopPropagation(); this.reviewNoteFlashcards(n); };
       }
@@ -4571,6 +4572,18 @@ class AtlasView extends TextFileView {
         for (const child of Array.from(el.children)) {
           if (child !== head) child.remove();
         }
+        head.querySelector('.ia-note-study')?.remove();
+        head.querySelector('.ia-flash-badge')?.remove();
+        head.querySelector('.ia-count')?.remove();
+        head.querySelector('.ia-card-remove')?.remove();
+
+        let titleSpan = head.querySelector('.ia-card-title');
+        if (!titleSpan) {
+          titleSpan = head.createSpan({ cls: 'ia-card-title' });
+          if (head.firstChild) head.insertBefore(titleSpan, head.firstChild);
+        }
+        titleSpan.textContent = titleText;
+        titleSpan.title = titleText;
         const thumbUrl = !n.noteExpanded && n.path ? this.getMindNodeImage(n) : null;
         el.classList.toggle('is-expanded-note', Boolean(n.noteExpanded && n.path));
         el.classList.toggle('has-thumb-image', Boolean(thumbUrl));
@@ -5511,7 +5524,12 @@ class AtlasView extends TextFileView {
         if (!this.board.nodes.includes(node)) return;
         if (!node.parentId && await this.plugin.visualSource(file)) { await this.addVisualNote(file); return; }
         if (!this.board.nodes.includes(node)) return;
-        this.checkpoint(); node.path = file.path; this.changed(true); this.render(); if (!node.parentId) await this.persistMindRoot(node);
+        this.checkpoint(); node.path = file.path;
+        if (!node.title || !node.title.trim() || node.title === 'Novo tópico' || node.title === 'Nova relação') {
+          node.title = file.basename;
+        }
+        this.layoutMind(node.mapId);
+        this.changed(true); this.render(); if (!node.parentId) await this.persistMindRoot(node);
       } catch (error) { new Notice(`Não foi possível vincular a nota: ${error.message}`); }
     }, 'Vincular este nó a uma nota…').open();
   }

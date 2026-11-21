@@ -10,6 +10,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
  const localElectron=await fs.stat(path.join(electronDist,'electron.exe')).then(()=>true,()=>false);
  run(['node_modules/electron-builder/cli.js','--win','nsis','--x64','--config.directories.output='+stage,...(localElectron?['--config.electronDist='+electronDist]:[])]);
  const name=pkg.build.win.artifactName.replace('${version}',pkg.version).replace('${ext}','exe'),destination=path.join(root,'release');await fs.mkdir(destination,{recursive:true});await fs.copyFile(path.join(stage,name),path.join(destination,name));
+ await fs.rm(stage,{recursive:true,force:true});
  const data=await fs.readFile(path.join(destination,name)),hash=crypto.createHash('sha256').update(data).digest('hex');
  await fs.writeFile(path.join(destination,'SHA256SUMS.txt'),`${hash}  ${name}\n`);
  console.log(`Instalador: ${path.join(destination,name)}\nSHA-256: ${hash}`);
