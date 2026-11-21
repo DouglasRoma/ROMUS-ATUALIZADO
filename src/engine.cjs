@@ -4339,10 +4339,10 @@ class AtlasView extends TextFileView {
       const thumbUrl = this.getMindNodeImage(node);
       if (thumbUrl) {
         node.h = 125;
-        node.w = Math.max(180, Math.min(280, (node.title?.length || 10) * 8.5 + 90));
+        node.w = Math.max(200, Math.min(420, (node.title?.length || 10) * 9.5 + 130));
       } else {
         node.h = node.parentId ? 36 : 40;
-        node.w = Math.max(160, Math.min(280, (node.title?.length || 10) * 8.5 + 90));
+        node.w = Math.max(185, Math.min(420, (node.title?.length || 10) * 9.5 + 130));
       }
     }
     this.layoutMind(node.mapId);
@@ -4388,11 +4388,11 @@ class AtlasView extends TextFileView {
           const thumbUrl = node.path ? this.getMindNodeImage(node) : null;
           if (thumbUrl) {
             const targetH = 125;
-            const targetW = Math.max(180, Math.min(280, (node.title?.length || 10) * 8.5 + 90));
+            const targetW = Math.max(200, Math.min(420, (node.title?.length || 10) * 9.5 + 130));
             if (node.h !== targetH || node.w !== targetW) { node.h = targetH; node.w = targetW; resizedMaps.add(node.mapId); }
           } else {
             const targetH = node.parentId ? 36 : 40;
-            const targetW = Math.max(160, Math.min(280, (node.title?.length || 10) * 8.5 + 90));
+            const targetW = Math.max(185, Math.min(420, (node.title?.length || 10) * 9.5 + 130));
             if (node.h !== targetH || node.w !== targetW) { node.h = targetH; node.w = targetW; resizedMaps.add(node.mapId); }
           }
         }
@@ -4546,6 +4546,27 @@ class AtlasView extends TextFileView {
         if (session.reader) { session.reader.node = n; session.reader.refresh(); }
         if (this.webObserver) this.webObserver.observe(el); else { this.visibleWeb.add(n.id); activate(n); }
       } else if (n.type === 'mind') {
+        if (n.relation) {
+          el.className = 'ia-card ia-mind ia-relation-node';
+          for (const child of Array.from(el.children)) {
+            if (child !== head) child.remove();
+          }
+          head.innerHTML = '';
+          const label = head.createSpan({ cls: 'ia-relation-label', text: n.title || 'Relação' });
+          label.title = 'Rótulo da linha · Dois cliques para renomear';
+          el.ondblclick = e => {
+            e.stopPropagation();
+            this.renameMindInline(n);
+          };
+          el.onclick = e => {
+            e.stopPropagation();
+            this.selected = { node: n.id };
+            this.highlight();
+            this.showSelection();
+          };
+          this.place(el, n);
+          continue;
+        }
         el.style.setProperty('--ia-mind-color', /^#[0-9a-f]{6}$/i.test(n.color) ? n.color : COLORS[0]);
         for (const child of Array.from(el.children)) {
           if (child !== head) child.remove();
@@ -4565,32 +4586,46 @@ class AtlasView extends TextFileView {
         }
 
         if (n.path) {
-          const expandBtn = head.createSpan({ cls: `ia-mind-note-badge is-linked ${n.noteExpanded ? 'is-expanded' : ''}` });
-          setIcon(expandBtn, n.noteExpanded ? 'chevrons-down-up' : 'chevrons-up-down');
-          expandBtn.createSpan({ text: n.noteExpanded ? 'Recolher' : 'Expandir' });
-          expandBtn.title = n.noteExpanded ? 'Recolher conteúdo da nota' : 'Expandir conteúdo da nota no mapa';
-          expandBtn.onpointerdown = e => e.stopPropagation();
-          expandBtn.onclick = e => {
+          const noteBadge = head.createSpan({ cls: `ia-mind-note-badge is-linked ${n.noteExpanded ? 'is-expanded' : ''}` });
+          setIcon(noteBadge, n.noteExpanded ? 'chevrons-down-up' : 'file-text');
+          noteBadge.createSpan({ text: n.noteExpanded ? 'Recolher' : 'Nota' });
+          noteBadge.title = n.noteExpanded ? 'Recolher conteúdo da nota' : 'Opções da nota (Expandir, Abrir, Trocar, Desvincular)';
+          noteBadge.onpointerdown = e => e.stopPropagation();
+          noteBadge.onclick = e => {
             e.stopPropagation();
-            this.toggleMindNoteExpanded(n);
+            const menu = new Menu();
+            menu.addItem(i => i.setTitle(n.noteExpanded ? 'Recolher nota no mapa' : 'Expandir nota no mapa').setIcon(n.noteExpanded ? 'chevrons-down-up' : 'chevrons-up-down').onClick(() => this.toggleMindNoteExpanded(n)));
+            menu.addItem(i => i.setTitle('Abrir nota no editor').setIcon('external-link').onClick(() => this.openNote(n.path)));
+            menu.addItem(i => i.setTitle('Trocar por outra nota existente...').setIcon('link').onClick(() => this.linkMindNote(n)));
+            menu.addItem(i => i.setTitle('Desvincular nota deste nó').setIcon('unlink').onClick(() => { this.checkpoint(); n.path = ''; n.noteExpanded = false; this.changed(true); this.render(); }));
+            const r = noteBadge.getBoundingClientRect();
+            menu.showAtPosition({ x: r.left, y: r.bottom + 4 });
           };
 
-          const openNoteBtn = head.createEl('button', { cls: 'ia-mind-open-note-btn', attr: { title: 'Abrir nota Markdown no editor', 'aria-label': 'Abrir nota' } });
-          setIcon(openNoteBtn, 'external-link');
+          const openNoteBtn = head.createEl('button', { cls: 'ia-mind-open-note-btn', attr: { title: n.noteExpanded ? 'Recolher nota' : 'Expandir nota no mapa', 'aria-label': n.noteExpanded ? 'Recolher' : 'Expandir' } });
+          setIcon(openNoteBtn, n.noteExpanded ? 'chevrons-down-up' : 'chevrons-up-down');
           openNoteBtn.onpointerdown = e => e.stopPropagation();
           openNoteBtn.onclick = e => {
             e.stopPropagation();
-            this.openNote(n.path);
+            this.toggleMindNoteExpanded(n);
           };
         } else {
           const noteBadge = head.createSpan({ cls: 'ia-mind-note-badge' });
           setIcon(noteBadge, 'file-plus');
           noteBadge.createSpan({ text: '+ Nota' });
-          noteBadge.title = 'Criar nota Markdown deste nó';
+          noteBadge.title = 'Criar nota ou vincular nota existente';
           noteBadge.onpointerdown = e => e.stopPropagation();
-          noteBadge.onclick = async e => {
+          noteBadge.onclick = e => {
             e.stopPropagation();
-            await this.convertMindNote(n);
+            const menu = new Menu();
+            menu.addItem(i => i.setTitle(`Criar nota: "${n.title}"`).setIcon('file-plus').onClick(async () => {
+              await this.convertMindNote(n);
+            }));
+            menu.addItem(i => i.setTitle('Vincular nota existente...').setIcon('link').onClick(() => {
+              this.linkMindNote(n);
+            }));
+            const r = noteBadge.getBoundingClientRect();
+            menu.showAtPosition({ x: r.left, y: r.bottom + 4 });
           };
         }
 
@@ -5185,7 +5220,7 @@ class AtlasView extends TextFileView {
   }
   makeMindMap(title, body, position) {
     const id = uid();
-    const w = Math.max(180, Math.min(260, (title.length || 10) * 8.5 + 90));
+    const w = Math.max(185, Math.min(420, (title.length || 10) * 9.5 + 130));
     const root = { id, type: 'mind', mapId: id, parentId: '', path: '', title, body, color: COLORS[0], collapsed: false, x: position.x, y: position.y, w, h: 40 };
     this.board.nodes.push(root); return root;
   }
@@ -5199,18 +5234,19 @@ class AtlasView extends TextFileView {
     const resized = new Set(), doc = this.contentEl?.ownerDocument;
     if (!this.relationMeasure && doc) this.relationMeasure = doc.createElement('canvas').getContext('2d');
     const font = doc?.defaultView?.getComputedStyle(this.contentEl).fontFamily || 'sans-serif';
-    if (this.relationMeasure) this.relationMeasure.font = `750 13px ${font}`;
+    if (this.relationMeasure) this.relationMeasure.font = `600 12px ${font}`;
     this.relationWidths ||= new Map();
     for (const node of this.board.nodes) if (node.relation && (!mapId || node.mapId === mapId)) {
       const key = `${font}:${node.title}`;
       let textWidth = this.relationWidths.get(key);
       if (textWidth === undefined) {
-        textWidth = this.relationMeasure ? this.relationMeasure.measureText(node.title).width : node.title.length * 8;
+        textWidth = this.relationMeasure ? this.relationMeasure.measureText(node.title || 'Relação').width : (node.title || 'Relação').length * 8;
         this.relationWidths.set(key, textWidth);
         if (this.relationWidths.size > 200) this.relationWidths.delete(this.relationWidths.keys().next().value);
       }
-      const width = Math.max(260, Math.ceil(textWidth) + 172);
-      if (node.w !== width) { node.w = width; resized.add(node.mapId); }
+      const width = Math.max(76, Math.min(260, Math.ceil(textWidth) + 26));
+      const height = 26;
+      if (node.w !== width || node.h !== height) { node.w = width; node.h = height; resized.add(node.mapId); }
     }
     return resized;
   }
@@ -5229,26 +5265,50 @@ class AtlasView extends TextFileView {
           const thumbUrl = node.path ? this.getMindNodeImage(node) : null;
           if (thumbUrl) {
             node.h = 125;
-            node.w = Math.max(180, Math.min(280, (node.title?.length || 10) * 8.5 + 90));
+            node.w = Math.max(200, Math.min(420, (node.title?.length || 10) * 9.5 + 130));
           } else {
             node.h = node.parentId ? 36 : 40;
-            node.w = Math.max(160, Math.min(280, (node.title?.length || 10) * 8.5 + 90));
+            node.w = Math.max(185, Math.min(420, (node.title?.length || 10) * 9.5 + 130));
           }
         }
       }
     }
     const order = [], stack = [root], seen = new Set();
     while (stack.length) { const n = stack.pop(); if (seen.has(n.id)) continue; seen.add(n.id); order.push(n); if (!n.collapsed) stack.push(...(this.mindChildren.get(n.id) || [])); }
-    const spans = new Map(), gap = 16, column = Math.max(180, Math.min(260, Math.max(...order.map(n => n.w)))) + 70;
+    const spans = new Map(), gap = 16;
     for (let i = order.length - 1; i >= 0; i--) {
       const n = order[i], children = n.collapsed ? [] : this.mindChildren.get(n.id) || [];
       const total = children.reduce((sum, child) => sum + (spans.get(child.id) || child.h), 0) + Math.max(0, children.length - 1) * gap;
       spans.set(n.id, Math.max(n.h, total));
     }
+    const depths = new Map();
+    depths.set(root.id, 0);
+    const depthStack = [root];
+    while (depthStack.length) {
+      const cur = depthStack.pop();
+      const d = depths.get(cur.id) || 0;
+      const children = cur.collapsed ? [] : this.mindChildren.get(cur.id) || [];
+      for (const ch of children) {
+        depths.set(ch.id, d + 1);
+        depthStack.push(ch);
+      }
+    }
+    const maxWByDepth = new Map();
+    for (const n of order) {
+      const d = depths.get(n.id) || 0;
+      maxWByDepth.set(d, Math.max(maxWByDepth.get(d) || 0, n.w));
+    }
+    const xByDepth = new Map();
+    xByDepth.set(0, root.x);
+    const maxDepth = Math.max(0, ...Array.from(depths.values()));
+    for (let d = 1; d <= maxDepth; d++) {
+      const prevW = maxWByDepth.get(d - 1) || 200;
+      xByDepth.set(d, xByDepth.get(d - 1) + prevW + 65);
+    }
     const positions = [{ node: root, depth: 0, top: root.y + root.h / 2 - spans.get(root.id) / 2 }];
     while (positions.length) {
       const { node: n, depth, top } = positions.pop();
-      if (depth) { n.x = root.x + depth * column; n.y = top + (spans.get(n.id) - n.h) / 2; }
+      if (depth) { n.x = xByDepth.get(depth); n.y = top + (spans.get(n.id) - n.h) / 2; }
       const children = n.collapsed ? [] : this.mindChildren.get(n.id) || [];
       const total = children.reduce((sum, child) => sum + spans.get(child.id), 0) + Math.max(0, children.length - 1) * gap;
       let y = top + (spans.get(n.id) - total) / 2;
@@ -5353,10 +5413,27 @@ class AtlasView extends TextFileView {
   }
   collapseMind(node) { this.checkpoint(); node.collapsed = !node.collapsed; this.layoutMind(node.mapId); this.selected = { node: node.id }; this.changed(false, false); this.render(); this.focusNode(node); }
   async createAtlasNote(title, body) {
-    await this.plugin.folder(this.app.preferences.notesFolder || 'Notas');
-    const path = this.plugin.unique(`${this.app.preferences.notesFolder || 'Notas'}/${namePart(title)}.md`), index = this.app.vault.getFileByPath(this.board.indexPath);
+    const folder = this.app.preferences.notesFolder || 'Notas';
+    await this.plugin.folder(folder);
+    const cleanTitle = namePart(title);
+    const targetPath = `${folder}/${cleanTitle}.md`;
+    const existing = this.app.vault.getFileByPath(targetPath) || this.app.vault.getFiles().find(f => f.path.toLowerCase() === targetPath.toLowerCase());
+    if (existing) {
+      return existing;
+    }
+    const path = this.plugin.unique(targetPath), index = this.app.vault.getFileByPath(this.board.indexPath);
     const link = index ? `\n\n---\nQuadro: ${this.app.fileManager.generateMarkdownLink(index, path)}\n` : '\n';
-    return this.app.vault.create(path, `# ${title}\n\n${body}${link}`);
+    try {
+      return await this.app.vault.create(path, `# ${title}\n\n${body || ''}${link}`);
+    } catch (e) {
+      if (e.message && e.message.includes('EEXIST')) {
+        const fallback = this.app.vault.getFileByPath(path) || this.app.vault.getFiles().find(f => f.path.toLowerCase() === path.toLowerCase());
+        if (fallback) return fallback;
+        const safeUnique = `${folder}/${cleanTitle} ${Date.now().toString(36)}.md`;
+        return await this.app.vault.create(safeUnique, `# ${title}\n\n${body || ''}${link}`);
+      }
+      throw e;
+    }
   }
   async convertMindNote(node, options = {}) {
     if (!this.board.nodes.includes(node)) return;
@@ -5448,10 +5525,17 @@ class AtlasView extends TextFileView {
     if (node.parentId) action('Mover ramo para outro pai', 'git-pull-request-arrow', () => this.beginMindReparent(node));
     menu.addSeparator();
     if (!node.relation) {
-      if (node.path) action(node.noteExpanded ? 'Recolher nota no mapa' : 'Expandir nota no mapa', node.noteExpanded ? 'chevrons-down-up' : 'chevrons-up-down', () => this.toggleMindNoteExpanded(node));
-      action(node.path ? 'Abrir nota' : 'Criar nota · Ctrl+Shift+Enter', 'file-text', () => node.path ? this.openNote(node.path) : this.convertMindNote(node, { open: false }));
+      if (node.path) {
+        action(node.noteExpanded ? 'Recolher nota no mapa' : 'Expandir nota no mapa', node.noteExpanded ? 'chevrons-down-up' : 'chevrons-up-down', () => this.toggleMindNoteExpanded(node));
+        action('Abrir nota no editor', 'file-text', () => this.openNote(node.path));
+        action('Trocar nota vinculada...', 'link', () => this.linkMindNote(node));
+      } else {
+        action('Criar nota · Ctrl+Shift+Enter', 'file-plus', () => this.convertMindNote(node, { open: false }));
+        action('Vincular nota existente...', 'link', () => this.linkMindNote(node));
+      }
       if (node.path && node.parentId) action('Criar mapa mental desta nota', 'git-fork', () => this.toggleNoteMindMap(node));
-      if (!node.relation) { action('Colar imagem nesta nota ou nó', 'clipboard-paste', () => new MapImageModal(this, node, true).open()); if (node.path) action('Colar link nesta nota', 'link', () => this.app.noteMedia.pickForNode(this, node)); }
+      action('Colar imagem nesta nota ou nó', 'clipboard-paste', () => new MapImageModal(this, node, true).open());
+      if (node.path) action('Colar link nesta nota', 'link', () => this.app.noteMedia.pickForNode(this, node));
       if (node.path && node.parentId) action(node.visualExpanded ? 'Recolher nota visual' : 'Expandir nota visual', 'image-plus', () => this.toggleLinkedVisual(node));
     }
     action(noteFlashcardPath(node) && !node.relation ? 'Criar / editar flashcards desta nota' : 'Criar flashcard', 'layers', () => this.createFlashcard(node));
@@ -5871,7 +5955,7 @@ class AtlasView extends TextFileView {
     const relation = child.relation ? child : parent.relation ? parent : null;
     if (relation) { this.selected = { node: relation.id }; this.highlight(); this.showSelection(); this.focusNode(relation); this.renameMindInline(relation); return; }
     this.inlineRename?.finish(); this.checkpoint();
-    const group = { id: uid(), type: 'mind', relation: true, mapId: parent.mapId, parentId: parent.id, path: '', title: edge.label || 'Relação', body: '', color: edge.color || parent.color, collapsed: false, x: parent.x + 350, y: child.y, w: 180, h: 4 };
+    const group = { id: uid(), type: 'mind', relation: true, mapId: parent.mapId, parentId: parent.id, path: '', title: edge.label || 'Relação', body: '', color: edge.color || parent.color, collapsed: false, x: parent.x + 350, y: child.y, w: 100, h: 26 };
     this.board.nodes.splice(this.board.nodes.indexOf(child), 0, group); child.parentId = group.id; edge.to = { node: group.id }; delete edge.label;
     this.board.edges.push({ id: uid(), from: { node: group.id }, to: { node: child.id }, color: child.color || group.color, mindTree: true });
     this.layoutMind(parent.mapId); this.selected = { node: group.id }; this.changed(); this.render(); this.focusNode(group); this.renameMindInline(group, true);
@@ -7381,7 +7465,7 @@ module.exports = class ImageAtlasPlugin extends Plugin {
   }
 
   async folder(path) { const parts = normalizePath(path).split('/'); let current = ''; for (const part of parts) { current += (current ? '/' : '') + part; if (!this.app.vault.getAbstractFileByPath(current)) await this.app.vault.createFolder(current); } }
-  unique(path) { const dot = path.lastIndexOf('.'), base = path.slice(0, dot), ext = path.slice(dot); let result = path, i = 2; while (this.app.vault.getAbstractFileByPath(result)) result = `${base} ${i++}${ext}`; return result; }
+  unique(path) { const dot = path.lastIndexOf('.'), base = path.slice(0, dot), ext = path.slice(dot); let result = path, i = 2; const has = p => Boolean(this.app.vault.getAbstractFileByPath(p) || this.app.vault.getFileByPath(p) || this.app.vault.getFiles().some(f => f.path.toLowerCase() === p.toLowerCase())); while (has(result)) result = `${base} ${i++}${ext}`; return result; }
   async openFile(file) { const leaf = this.app.workspace.getLeaf('tab'); await leaf.openFile(file); if (leaf.view instanceof AtlasView) leaf.view.fit(); }
   async boardSearchIndex(force = false) {
     if (this.searchIndexTask && !force) return this.searchIndexTask;

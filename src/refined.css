@@ -487,26 +487,41 @@ a.romus-cloze-editor-pill[data-has-tag="true"]::before{content:'🎴 ' attr(data
 }
 .ia-card.ia-mind .ia-card-head {
   border-radius: 24px !important;
-  padding: 0 12px !important;
+  padding: 0 10px 0 14px !important;
   height: 100% !important;
   display: flex !important;
   flex: 1 1 auto !important;
   align-items: center !important;
-  gap: 8px !important;
+  gap: 6px !important;
   border-bottom: none !important;
   background: transparent !important;
   user-select: none !important;
   cursor: grab !important;
+  min-width: 0 !important;
 }
 .ia-card.ia-mind .ia-card-title {
-  font-size: 13.5px !important;
+  font-size: 13px !important;
   font-weight: 600 !important;
   letter-spacing: -0.01em !important;
   color: var(--text-normal) !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
-  flex: 1 1 auto !important;
+  flex: 0 1 auto !important;
+  min-width: 0 !important;
+}
+.ia-card.ia-mind .ia-mind-add-btn,
+.ia-card.ia-mind .ia-node-menu {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transition: opacity 0.15s ease !important;
+}
+.ia-card.ia-mind:hover .ia-mind-add-btn,
+.ia-card.ia-mind:hover .ia-node-menu,
+.ia-card.ia-mind.is-selected .ia-mind-add-btn,
+.ia-card.ia-mind.is-selected .ia-node-menu {
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }
 .ia-card.ia-mind .ia-mind-note-badge {
   display: inline-flex !important;
@@ -674,6 +689,53 @@ a.romus-cloze-editor-pill[data-has-tag="true"]::before{content:'🎴 ' attr(data
   border-color: color-mix(in srgb, var(--interactive-accent) 50%, transparent) !important;
   background: var(--interactive-accent) !important;
   color: var(--text-on-accent) !important;
+}
+
+/* Edge Relation Labels (Clean Connector Label) */
+.ia-card.ia-mind.ia-relation-node {
+  height: 24px !important;
+  min-height: 24px !important;
+  border-radius: 12px !important;
+  padding: 0 !important;
+  background: var(--background-secondary, #202228) !important;
+  border: 1px dashed var(--background-modifier-border) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  z-index: 5 !important;
+}
+.ia-card.ia-mind.ia-relation-node:hover {
+  border-style: solid !important;
+  border-color: var(--text-accent) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35) !important;
+}
+.ia-card.ia-mind.ia-relation-node .ia-card-head {
+  padding: 0 10px !important;
+  height: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: transparent !important;
+  border: none !important;
+}
+.ia-card.ia-mind.ia-relation-node .ia-relation-label {
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  color: var(--text-muted) !important;
+  white-space: nowrap !important;
+  letter-spacing: 0.02em !important;
+}
+.ia-card.ia-mind.ia-relation-node:hover .ia-relation-label {
+  color: var(--text-normal) !important;
+}
+.ia-card.ia-mind.ia-relation-node .ia-resize,
+.ia-card.ia-mind.ia-relation-node .ia-mind-note-badge,
+.ia-card.ia-mind.ia-relation-node .ia-mind-add-btn,
+.ia-card.ia-mind.ia-relation-node .ia-mind-collapse-btn,
+.ia-card.ia-mind.ia-relation-node .ia-node-menu {
+  display: none !important;
 }
 
 /* VisualOS Mind Map Smooth Splines */
