@@ -10,7 +10,7 @@ const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 const clone = value => JSON.parse(JSON.stringify(value));
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const namePart = value => String(value).replace(/[\\/:*?"<>|#\[\]\r\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100) || 'Sem título';
-const emptyBoard = title => ({ version: 1, title, indexPath: '', nodes: [], edges: [], camera: { x: 80, y: 70, z: 1 } });
+const emptyBoard = title => ({ version: 1, title, indexPath: '', nodes: [], edges: [], drawings: [], grid: 'dots', camera: { x: 80, y: 70, z: 1 } });
 const safeUrl = raw => { try { const url = new URL(raw); return /^https?:$/.test(url.protocol) && !url.username && !url.password ? url.href : null; } catch { return null; } };
 
 // Bundled offline: ts-fsrs 5.4.2 (MIT), open-spaced-repetition. See vendor/ts-fsrs-LICENSE.
@@ -2011,6 +2011,8 @@ function parseBoard(raw) {
   }
   if (!b.camera || ![b.camera.x, b.camera.y, b.camera.z].every(finite)) b.camera = { x: 80, y: 70, z: 1 };
   b.camera.z = Math.min(3, Math.max(.15, b.camera.z));
+  b.drawings = Array.isArray(b.drawings) ? b.drawings : [];
+  b.grid = typeof b.grid === 'string' ? b.grid : 'dots';
   if (b.groups !== undefined) {
     if (!Array.isArray(b.groups)) throw new Error('Grupos inválidos.');
     const groupIds = new Set();
@@ -2268,6 +2270,7 @@ function parseNoteFlashcards(text, path = '', strict = false) {
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/), cards = [], errors = [];
   let frontmatter = lines[0] === '---', visual = false, comment = false, fence = null, previous = null;
   const hierarchyStack = [];
+  let clozeDocIndex = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i], trimmed = line.trim();
@@ -2340,7 +2343,10 @@ function parseNoteFlashcards(text, path = '', strict = false) {
         else if (cl.label) promptBadge = `[${cl.label}]`;
         else if (cl.hint) promptBadge = `[${cl.hint}]`;
         else promptBadge = '[...]';
-        let q = promptLine.replace(cl.full, promptBadge);
+        const docIdx = clozeDocIndex++;
+        let q = (typeof cl.index === 'number' && cl.index >= 0)
+          ? promptLine.slice(0, cl.index) + promptBadge + promptLine.slice(cl.index + cl.full.length)
+          : promptLine.replace(cl.full, promptBadge);
         q = q.replace(/\{\{((?:[^{}]|(?<=\\)[{}])+)\}\}/g, (_, inner) => {
           const parts = inner.split('::');
           return /^c\d+$/i.test(parts[0].trim()) ? (parts[1] || '').trim() : (parts[0] || '').trim();
@@ -2356,6 +2362,7 @@ function parseNoteFlashcards(text, path = '', strict = false) {
           clozeFull: cl.full,
           raw: cl.full,
           clozeNumber: cl.clozeNumber,
+          clozeDocIndex: docIdx,
           isCloze: true,
           sourceLine: i + 1,
           rawLine: line,
@@ -3845,13 +3852,13 @@ class AtlasView extends TextFileView {
     if (this.viewport?.isConnected && this.contentEl.contains(this.viewport)) {
       if (this.backBoardButton) this.backBoardButton.disabled = !this.plugin.whiteboardHistory?.get(this.leaf.id)?.length;
       this.viewport.className = `ia-viewport mode-${this.mode}`;
-      if (this.hint) this.hint.textContent = this.mode === 'area' ? 'Arraste sobre a imagem para marcar uma área · Escape cancela.' : this.mode === 'pin' ? 'Clique na imagem para colocar um alfinete.' : this.mode === 'connect' ? 'Clique na origem e depois no destino.' : 'Arraste os cartões pelo título · Arraste o fundo para mover · Use a roda para ampliar';
+      if (this.hint) this.hint.textContent = this.mode === 'draw' ? 'Arraste para desenhar livremente no quadro · Esc volta para mover.' : this.mode === 'area' ? 'Arraste sobre a imagem para marcar uma área · Escape cancela.' : this.mode === 'pin' ? 'Clique na imagem para colocar um alfinete.' : this.mode === 'connect' ? 'Clique na origem e depois no destino.' : 'Arraste os cartões pelo título · Arraste o fundo para mover · Use a roda para ampliar';
       for (const button of this.contentEl.querySelectorAll('.ia-toolbar .ia-tool')) {
         const label = button.getAttribute('aria-label');
-        if (['Alfinete', 'Área', 'Conectar', 'Mover'].includes(label)) button.toggleClass('is-active', label === ({ pin: 'Alfinete', area: 'Área', connect: 'Conectar', select: 'Mover' })[this.mode]);
+        if (['Alfinete', 'Área', 'Conectar', 'Mover', 'Desenhar'].includes(label)) button.toggleClass('is-active', label === ({ pin: 'Alfinete', area: 'Área', connect: 'Conectar', select: 'Mover', draw: 'Desenhar' })[this.mode]);
       }
       this.viewport.querySelector('.ia-empty')?.remove();
-      this.drawNodes(); this.drawEdges(); this.camera(); this.showSelection(); return;
+      this.applyGrid(); this.drawDrawings(); this.renderDrawingPalette(); this.drawNodes(); this.drawEdges(); this.camera(); this.showSelection(); return;
     }
     this.releasePreviews(); this.contentEl.empty(); this.contentEl.addClass('ia-view'); this.contentEl.toggleClass('ia-mobile', Platform.isMobile);
     this.contentEl.onclick = e => {
@@ -3883,6 +3890,8 @@ class AtlasView extends TextFileView {
     this.button(toolbar, 'Área', 'scan', () => this.setMode('area'), this.mode === 'area');
     this.button(toolbar, 'Conectar', 'waypoints', () => this.setMode('connect'), this.mode === 'connect');
     this.button(toolbar, 'Mover', 'mouse-pointer-2', () => this.setMode('select'), this.mode === 'select');
+    this.button(toolbar, 'Desenhar', 'pencil', () => this.setMode('draw'), this.mode === 'draw');
+    this.button(toolbar, 'Grade do quadro', 'grid', () => this.toggleGrid());
     this.button(toolbar, 'Enquadrar', 'scan', () => this.fit());
     this.button(toolbar, 'Desfazer', 'undo-2', () => this.undo());
     this.button(toolbar, 'Refazer', 'redo-2', () => this.undo(true));
@@ -3894,6 +3903,7 @@ class AtlasView extends TextFileView {
     if (Platform.isMobile) this.bindTouchGestures(this.viewport);
     this.world = this.viewport.createDiv({ cls: 'ia-world' });
     this.groupsEl = this.world.createDiv({ cls: 'ia-groups' });
+    this.drawingsEl = this.world.createDiv({ cls: 'ia-drawings' });
     this.edgesEl = this.world.createDiv({ cls: 'ia-edges' });
     this.nodesEl = this.world.createDiv({ cls: 'ia-nodes' });
     this.webLayer = this.viewport.createDiv({ cls: 'ia-web-layer' });
@@ -3908,7 +3918,31 @@ class AtlasView extends TextFileView {
     this.zoomLabel = footer.createSpan();
     this.hint.addClass('ia-mobile-hint');
     this.viewport.onpointerdown = e => {
-      if (e.target !== this.viewport && e.target !== this.world && e.target !== this.nodesEl && e.target !== this.edgesEl) return;
+      if (this.mode === 'draw') {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        this.viewport.focus();
+        const pos = this.toWorld(e.clientX, e.clientY);
+        const strokeColor = this.drawColor || '#38bdf8';
+        const strokeWidth = this.drawWidth || 3;
+        const currentStroke = { id: uid(), color: strokeColor, width: strokeWidth, points: [pos] };
+        this.board.drawings = Array.isArray(this.board.drawings) ? this.board.drawings : [];
+        this.board.drawings.push(currentStroke);
+        const doc = this.contentEl.ownerDocument, ns = 'http://www.w3.org/2000/svg';
+        const livePath = doc.createElementNS(ns, 'path');
+        livePath.setAttribute('class', 'ia-draw-stroke');
+        livePath.setAttribute('fill', 'none');
+        livePath.setAttribute('stroke', strokeColor);
+        livePath.setAttribute('stroke-width', String(strokeWidth));
+        livePath.setAttribute('stroke-linecap', 'round');
+        livePath.setAttribute('stroke-linejoin', 'round');
+        livePath.setAttribute('vector-effect', 'non-scaling-stroke');
+        livePath.setAttribute('d', `M ${pos.x} ${pos.y}`);
+        this.drawSvg?.appendChild(livePath);
+        this.drag = { type: 'draw', stroke: currentStroke, element: livePath, pointerId: e.pointerId };
+        return;
+      }
+      if (e.target !== this.viewport && e.target !== this.world && e.target !== this.nodesEl && e.target !== this.edgesEl && e.target !== this.drawingsEl && !e.target.closest?.('.ia-draw-svg')) return;
       if (e.button !== 0 && e.button !== 1) return;
       e.preventDefault(); this.viewport.focus();
       this.multiSelection?.clear(); this.selectedGroup = null; this.selected = null; this.highlight(); this.showSelection();
@@ -3944,7 +3978,7 @@ class AtlasView extends TextFileView {
       if (files.length) this.importFiles(files, pos);
       else { const path = e.dataTransfer?.getData('text/plain')?.replace(/^!?\[\[|\]\]$/g, '').split('|')[0]; const file = path && (this.app.vault.getFileByPath(path) || this.app.metadataCache.getFirstLinkpathDest(path, this.file?.path || '')); if (file && /^(png|jpe?g|gif|webp|svg|avif|bmp)$/i.test(file.extension)) this.addImage(file, pos); else if (file?.extension === 'md') this.addVisualNote(file, pos); else if (file?.extension === 'imageboard') this.addSubboard(file, pos); }
     };
-    this.drawNodes(); this.drawEdges(); this.camera(); this.showSelection();
+    this.applyGrid(); this.drawDrawings(); this.renderDrawingPalette(body); this.drawNodes(); this.drawEdges(); this.camera(); this.showSelection();
     if (!this.board.nodes.length) {
       const empty = this.viewport.createDiv({ cls: 'ia-empty' });
       empty.createEl('h2', { text: 'Uma imagem. Várias ideias.' });
@@ -3954,6 +3988,99 @@ class AtlasView extends TextFileView {
     }
   }
   setMode(mode) { this.pendingAreaPin = null; this.pendingMapPin = null; this.mode = this.mode === mode && mode !== 'select' ? 'select' : mode; this.source = null; this.render(); for (const session of this.webSessions?.values() || []) session.reader?.setMarking(this.mode === 'pin'); }
+  toggleGrid() {
+    const modes = ['dots', 'lines', 'none'];
+    const current = this.board.grid || 'dots';
+    const next = modes[(modes.indexOf(current) + 1) % modes.length];
+    this.checkpoint('board');
+    this.board.grid = next;
+    this.applyGrid();
+    this.changed();
+    new Notice(`Grade do quadro: ${next === 'dots' ? 'Pontilhada' : next === 'lines' ? 'Quadriculada' : 'Desativada'}`);
+  }
+  applyGrid() {
+    if (!this.viewport) return;
+    const grid = this.board.grid || 'dots';
+    this.viewport.classList.toggle('has-grid-dots', grid === 'dots');
+    this.viewport.classList.toggle('has-grid-lines', grid === 'lines');
+    this.viewport.classList.toggle('has-no-grid', grid === 'none');
+  }
+  drawDrawings() {
+    if (!this.drawingsEl) return;
+    const doc = this.contentEl.ownerDocument, ns = 'http://www.w3.org/2000/svg';
+    if (!this.drawSvg?.isConnected || this.drawSvg.parentElement !== this.drawingsEl) {
+      this.drawingsEl.empty();
+      this.drawSvg = doc.createElementNS(ns, 'svg');
+      this.drawSvg.setAttribute('class', 'ia-draw-svg');
+      this.drawSvg.setAttribute('width', '100%');
+      this.drawSvg.setAttribute('height', '100%');
+      this.drawingsEl.appendChild(this.drawSvg);
+    }
+    this.drawSvg.innerHTML = '';
+    const drawings = Array.isArray(this.board.drawings) ? this.board.drawings : [];
+    for (const stroke of drawings) {
+      if (!stroke.points || stroke.points.length < 2) continue;
+      const path = doc.createElementNS(ns, 'path');
+      path.setAttribute('class', 'ia-draw-stroke');
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', stroke.color || '#38bdf8');
+      path.setAttribute('stroke-width', String(stroke.width || 3));
+      path.setAttribute('stroke-linecap', 'round');
+      path.setAttribute('stroke-linejoin', 'round');
+      path.setAttribute('vector-effect', 'non-scaling-stroke');
+      let d = `M ${stroke.points[0].x} ${stroke.points[0].y}`;
+      for (let i = 1; i < stroke.points.length; i++) {
+        d += ` L ${stroke.points[i].x} ${stroke.points[i].y}`;
+      }
+      path.setAttribute('d', d);
+      this.drawSvg.appendChild(path);
+    }
+  }
+  renderDrawingPalette(body) {
+    this.drawingPalette?.remove();
+    this.drawingPalette = null;
+    if (this.mode !== 'draw') return;
+    const palette = this.drawingPalette = (body || this.contentEl.querySelector('.ia-body') || this.contentEl).createDiv({ cls: 'ia-drawing-palette' });
+    const colors = ['#ffffff', '#38bdf8', '#4ade80', '#fbbf24', '#f43f5e', '#a855f7'];
+    this.drawColor = this.drawColor || '#38bdf8';
+    this.drawWidth = this.drawWidth || 3;
+
+    const colorsWrap = palette.createDiv({ cls: 'ia-palette-colors' });
+    for (const c of colors) {
+      const btn = colorsWrap.createEl('button', { cls: `ia-color-swatch${this.drawColor === c ? ' is-active' : ''}` });
+      btn.style.backgroundColor = c;
+      btn.onclick = () => {
+        this.drawColor = c;
+        colorsWrap.querySelectorAll('.ia-color-swatch').forEach(b => b.classList.toggle('is-active', b === btn));
+      };
+    }
+
+    const sizesWrap = palette.createDiv({ cls: 'ia-palette-sizes' });
+    for (const [w, label] of [[2, 'Fino'], [4, 'Médio'], [8, 'Grosso']]) {
+      const btn = sizesWrap.createEl('button', { cls: `ia-size-btn${this.drawWidth === w ? ' is-active' : ''}`, text: label });
+      btn.onclick = () => {
+        this.drawWidth = w;
+        sizesWrap.querySelectorAll('.ia-size-btn').forEach(b => b.classList.toggle('is-active', b === btn));
+      };
+    }
+
+    const clearBtn = palette.createEl('button', { cls: 'ia-palette-btn mod-warning', text: 'Limpar desenhos' });
+    setIcon(clearBtn, 'trash-2');
+    clearBtn.onclick = () => {
+      if (!this.board.drawings?.length) return;
+      this.checkpoint('board');
+      this.board.drawings = [];
+      this.drawDrawings();
+      this.changed();
+      new Notice('Desenhos do quadro apagados.');
+    };
+
+    const doneBtn = palette.createEl('button', { cls: 'ia-palette-btn mod-cta', text: 'Concluir' });
+    setIcon(doneBtn, 'check');
+    doneBtn.onclick = () => {
+      this.setMode('select');
+    };
+  }
   previewImageNote(event, target = event.target) {
     const card = target?.closest?.('.ia-image');
     if (!card || !this.contentEl.contains(card) || target.closest('button,.ia-resize')) { this.imageHover = null; this.imageHoverShown = null; return false; }
@@ -4470,11 +4597,19 @@ class AtlasView extends TextFileView {
       let pair = this.edgeElements.get(e.id);
       if (!pair) {
         const path = doc.createElementNS(ns, 'path'), dot = doc.createElementNS(ns, 'circle');
-        path.setAttribute('class', 'ia-line'); path.setAttribute('vector-effect', 'non-scaling-stroke'); dot.setAttribute('r', '4');
+        path.setAttribute('class', e.mindTree ? 'ia-line ia-mind-edge' : 'ia-line'); path.setAttribute('vector-effect', 'non-scaling-stroke'); dot.setAttribute('r', e.mindTree ? '3' : '4');
+        if (e.mindTree) dot.setAttribute('class', 'ia-mind-dot');
         this.bindEdgeActions(path, e.id);
         this.edgeSvg.appendChild(path); this.edgeSvg.appendChild(dot); pair = { path, dot }; this.edgeElements.set(e.id, pair);
       }
       pair.geometry = geometry; pair.hidden = false;
+      if (e.mindTree) {
+        pair.path.classList.add('ia-mind-edge');
+        pair.dot.classList.add('ia-mind-dot');
+      } else {
+        pair.path.classList.remove('ia-mind-edge');
+        pair.dot.classList.remove('ia-mind-dot');
+      }
       const bend = Math.max(65, Math.abs(b.x - a.x) * .45), direction = b.x >= a.x ? 1 : -1;
       pair.path.setAttribute('d', 'M ' + a.x + ' ' + a.y + ' C ' + (a.x + bend * direction) + ' ' + a.y + ', ' + (b.x - bend * direction) + ' ' + b.y + ', ' + b.x + ' ' + b.y);
       const color = /^#[0-9a-f]{6}$/i.test(e.color) ? e.color : COLORS[0];

@@ -57,7 +57,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),esbuild=require('
     const originHash = visualContentHash(bundle);
     const originRoots = new Set((origin?.board.nodes || []).filter(node => (node.visualSource === source || node.visualNote === notePath) && visualContentHash(reusableBundle(origin.board, node)) === originHash).map(node => node.id));`);
  standalone=standalone.replace('this.publishVisual(source, bundle, origin, notePath);','this.publishVisual(source, bundle, origin, notePath, originRoots);').replace('  publishVisual(source, bundle, origin, notePath) {','  publishVisual(source, bundle, origin, notePath, originRoots) {').replace("        // The editing occurrence already contains this content; do not replace live references.","        if (view === origin && originRoots?.has(image.id)) continue;\n        // The editing occurrence already contains this content; do not replace live references.");
- await fs.writeFile(path.join(root,'src/engine.cjs'),standalone);
+ // await fs.writeFile(path.join(root,'src/engine.cjs'),standalone);
  await fs.writeFile(path.join(root,'resources/engine-origin.json'),JSON.stringify({name:'Image Atlas',pluginVersion:JSON.parse(await fs.readFile(path.join(engine,'manifest.json'),'utf8')).version,patches:['standalone interface wording','round 24-hour preview as one day','media note flashcards','independent embedded page zoom','media reader controls','untransformed crisp web surfaces','inline media and PDF reader','local PDF web cards']},null,2));
  await fs.copyFile(path.join(engine,'styles.css'),path.join(root,'dist/engine.css'));
  await fs.copyFile(path.join(engine,'vendor/ts-fsrs-LICENSE'),path.join(root,'resources/ts-fsrs-LICENSE'));

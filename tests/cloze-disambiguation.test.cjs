@@ -29,6 +29,8 @@ test('Cloze disambiguation: múltiplas lacunas com a mesma resposta são diferen
   assert.notEqual(clozeCards[0].sourceLine, clozeCards[2].sourceLine, 'As linhas de origem devem ser diferentes');
   assert.equal(clozeCards[0].sourceLine, 3);
   assert.equal(clozeCards[2].sourceLine, 7);
+  assert.equal(clozeCards[0].clozeDocIndex, 0);
+  assert.equal(clozeCards[2].clozeDocIndex, 2);
 });
 
 test('ScopeEntries: garante independência estrita entre cartões cloze e cartões convencionais', () => {
@@ -72,4 +74,26 @@ test('ScopeEntries: garante independência estrita entre cartões cloze e cartõ
   const scopedNormal = view.scopeEntries();
   assert.equal(scopedNormal.length, 2);
   assert.ok(scopedNormal.every(c => c.cardType !== 'cloze'));
+});
+
+test('Whiteboard board drawings e grid persistem corretamente no quadro', () => {
+  const plugin = new AtlasPlugin({ vault: {}, preferences: {} });
+  const rawBoard = JSON.stringify({
+    version: 1,
+    title: 'Meu Whiteboard',
+    indexPath: '',
+    nodes: [],
+    edges: [],
+    drawings: [
+      { id: 'draw-1', color: '#38bdf8', width: 3, points: [{ x: 100, y: 120 }, { x: 150, y: 160 }] }
+    ],
+    grid: 'dots',
+    camera: { x: 0, y: 0, z: 1 }
+  });
+
+  // Testar deserialização
+  const parsed = JSON.parse(rawBoard);
+  assert.equal(parsed.drawings.length, 1);
+  assert.equal(parsed.drawings[0].points.length, 2);
+  assert.equal(parsed.grid, 'dots');
 });

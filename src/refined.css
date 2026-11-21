@@ -334,3 +334,202 @@ a.romus-cloze-editor-pill[data-has-tag="true"]::before{content:'🎴 ' attr(data
 .romus-cloze-modal .ia-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .romus-cloze-modal .romus-cloze-segment-group{display:flex;flex-direction:column;gap:6px;padding:8px;background:var(--background-secondary-alt);border-radius:6px}
 .romus-cloze-modal .romus-cloze-radio-row{display:flex;align-items:center;gap:8px;font-size:13px}
+
+/* Whiteboard Canvas Grid Modes */
+.ia-viewport.has-grid-dots {
+  background-image: radial-gradient(circle, var(--text-faint, rgba(255, 255, 255, 0.18)) 1.2px, transparent 1.2px);
+  background-size: 24px 24px;
+}
+.ia-viewport.has-grid-lines {
+  background-image: 
+    linear-gradient(to right, color-mix(in srgb, var(--background-modifier-border) 60%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--background-modifier-border) 60%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.ia-viewport.has-no-grid {
+  background-image: none !important;
+}
+
+/* Whiteboard Drawing Canvas */
+.ia-drawings {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+.ia-draw-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100000px;
+  height: 100000px;
+  overflow: visible;
+  pointer-events: none;
+}
+.ia-draw-stroke {
+  pointer-events: none;
+}
+.ia-viewport.mode-draw {
+  cursor: crosshair !important;
+}
+.ia-drawing-palette {
+  position: absolute;
+  bottom: 48px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 30px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  animation: iaFadeSlideUp 0.15s ease-out;
+}
+@keyframes iaFadeSlideUp {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+.ia-palette-colors {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ia-color-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+.ia-color-swatch:hover {
+  transform: scale(1.15);
+}
+.ia-color-swatch.is-active {
+  border-color: var(--text-normal);
+  transform: scale(1.2);
+  box-shadow: 0 0 0 2px var(--background-primary);
+}
+.ia-palette-sizes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-left: 1px solid var(--background-modifier-border);
+  border-right: 1px solid var(--background-modifier-border);
+  padding: 0 8px;
+}
+.ia-size-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.ia-size-btn.is-active, .ia-size-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.ia-palette-btn {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 16px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ia-palette-btn.mod-cta {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+}
+.ia-palette-btn.mod-warning {
+  background: transparent;
+  color: var(--text-error);
+  border: 1px solid color-mix(in srgb, var(--text-error) 40%, transparent);
+}
+
+/* VisualOS-Style Mind Map Nodes */
+.ia-card.ia-mind {
+  border-radius: 12px;
+  border-left: 5px solid var(--ia-mind-color, var(--text-accent));
+  background: color-mix(in srgb, var(--surface-card, #1e2025) 96%, transparent);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(8px);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.ia-card.ia-mind:hover {
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+}
+.ia-card.ia-mind.is-selected {
+  outline: 2px solid var(--ia-mind-color, var(--text-accent));
+  outline-offset: 3px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
+.ia-card.ia-mind .ia-card-head {
+  border-radius: 10px 10px 0 0;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ia-card.ia-mind .ia-card-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-normal);
+}
+.ia-card.ia-mind .ia-mind-note-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--text-accent) 40%, transparent);
+  background: color-mix(in srgb, var(--text-accent) 12%, transparent);
+  color: var(--text-accent);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.ia-card.ia-mind .ia-mind-note-badge:hover {
+  background: var(--text-accent);
+  color: var(--text-on-accent);
+}
+.ia-card.ia-mind .ia-mind-note-badge.is-linked {
+  border-color: color-mix(in srgb, #10b981 40%, transparent);
+  background: color-mix(in srgb, #10b981 12%, transparent);
+  color: #10b981;
+}
+.ia-card.ia-mind .ia-mind-note-badge.is-linked:hover {
+  background: #10b981;
+  color: #ffffff;
+}
+.ia-mind-note-badge svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* VisualOS Mind Map Smooth Splines */
+.ia-line.ia-mind-edge {
+  stroke-width: 2.2px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.25));
+  transition: stroke-width 0.15s ease;
+}
+.ia-line.ia-mind-edge:hover {
+  stroke-width: 3.5px;
+}
+.ia-mind-dot {
+  opacity: 0.85;
+}

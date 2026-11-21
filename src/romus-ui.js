@@ -24,7 +24,12 @@ export function installRomusUI(app){
    const hasStandard=()=>(view.entries||[]).some(e=>e.cardType!=='cloze'&&!e.isCloze);
 
    // Mode buttons: Flashcards vs Cloze na Nota
-   view.studyMode=view.spec?.studyMode||(hasClozes()&&!hasStandard()?'cloze-note':'flashcards');
+   view.studyMode=view.spec?.studyMode||(hasClozes()?'cloze-note':'flashcards');
+
+   const clozesCount=()=>(view.entries||[]).filter(e=>e.isCloze||e.cardType==='cloze'||/\{\{/.test(e.question||e.answer||'')).length;
+   const standardCount=()=>(view.entries||[]).filter(e=>e.cardType!=='cloze'&&!e.isCloze).length;
+
+   let updateModeUI=()=>{};
 
    if(bar){
      const modeGroup=bar.createDiv({cls:'romus-study-mode-group'});
@@ -39,7 +44,12 @@ export function installRomusUI(app){
        attr:{type:'button',title:'Modo Cloze contextual na Nota (RemNote)'}
      });
 
-     const updateModeUI=()=>{
+     updateModeUI=()=>{
+       const sCount=standardCount(), cCount=clozesCount();
+       cardBtn.textContent=`🎴 Flashcards (${sCount})`;
+       clozeBtn.textContent=`📝 Cloze na Nota (${cCount})`;
+       cardBtn.style.display=sCount>0?'':'none';
+       clozeBtn.style.display=cCount>0?'':'none';
        cardBtn.classList.toggle('is-active',view.studyMode!=='cloze-note');
        clozeBtn.classList.toggle('is-active',view.studyMode==='cloze-note');
        cardBtn.setAttribute('aria-pressed',String(view.studyMode!=='cloze-note'));
@@ -66,10 +76,23 @@ export function installRomusUI(app){
      };
    }
 
-   // Hook view.show to render ClozeNoteStudy when mode is cloze-note
+   // Hook view.start to clear answered cloze tracking on restarts/error reviews
+   const origStart=view.start.bind(view);
+   view.start=function(mode){
+     if(view.clozeStudy?.answeredPills){
+       view.clozeStudy.answeredPills.clear();
+     }
+     return origStart(mode);
+   };
+
+   // Hook view.show to render ClozeNoteStudy when mode is cloze-note or item is cloze
    const origShow=view.show.bind(view);
    view.show=async function(){
-     if(view.studyMode==='cloze-note'){
+     const currentItem=view.current();
+     const isClozeItem=Boolean(currentItem&&(currentItem.entry.cardType==='cloze'||currentItem.entry.isCloze));
+     if(view.studyMode==='cloze-note'||isClozeItem){
+       view.studyMode='cloze-note';
+       updateModeUI();
        view.contentEl.ownerDocument.defaultView.clearTimeout(view.dueTimer);
        if(view.mode==='due'&&view.position===view.queue.length){
          const last=new Map(view.queue.map(item=>[item.entry.id,item]));

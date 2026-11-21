@@ -1,7 +1,7 @@
 {
   "name": "image-atlas-desktop",
   "productName": "ROMUS",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "description": "Whiteboards, mapas mentais, notas Markdown e revisão FSRS local.",
   "author": "Douglas",
   "private": true,
@@ -60,7 +60,5 @@
       "deleteAppDataOnUninstall": false
     }
   },
-  "dependencies": {
-    "lz-string": "^1.5.0"
-  }
+  "dependencies": {}
 }

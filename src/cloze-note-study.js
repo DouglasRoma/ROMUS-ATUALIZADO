@@ -60,7 +60,8 @@ export class ClozeNoteStudy {
     const pills = [...this.bodyHost.querySelectorAll('.romus-cloze-pill')];
     if (!pills.length) return;
 
-    const clozeEntries = (this.view.entries || []).filter(e => e.cardType === 'cloze' || e.isCloze);
+    const notePath = entry.sourcePath || this.view.spec.notePath;
+    const clozeEntries = (this.view.entries || []).filter(e => (e.cardType === 'cloze' || e.isCloze) && (!e.sourcePath || !notePath || e.sourcePath === notePath));
 
     // Tag each pill with its document-order cloze index and card metadata
     pills.forEach((pill, idx) => {
@@ -69,25 +70,44 @@ export class ClozeNoteStudy {
       if (ce) {
         pill.dataset.clozeCardId = ce.id || '';
         pill.dataset.clozeSourceId = ce.sourceCardId || '';
+        if (ce.clozeDocIndex != null) pill.dataset.clozeDocIndex = String(ce.clozeDocIndex);
       }
     });
 
     const normalize = s => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ');
     const targetAnswer = normalize(entry.answer || entry.clozeText);
 
-    // Exact match of entry to pill by position and identifiers
-    let targetIdx = clozeEntries.findIndex(e => e.id === entry.id || e.sourceCardId === entry.sourceCardId || (e.recordId && e.recordId === entry.recordId) || e === entry);
-
     let activePill = null;
-    if (targetIdx >= 0 && pills[targetIdx]) {
-      const pAns = normalize(pills[targetIdx].dataset.clozeAnswer || pills[targetIdx].textContent);
-      if (pAns === targetAnswer || pills[targetIdx].dataset.clozeRaw === (entry.clozeFull || entry.raw)) {
-        activePill = pills[targetIdx];
+
+    // 1. Direct match by card identifiers on pill dataset
+    activePill = pills.find(p => 
+      (entry.id && p.dataset.clozeCardId === entry.id) ||
+      (entry.sourceCardId && p.dataset.clozeSourceId === entry.sourceCardId)
+    );
+
+    // 2. Direct match by clozeDocIndex (from parseNoteFlashcards)
+    if (!activePill && entry.clozeDocIndex != null && pills[entry.clozeDocIndex]) {
+      const candidate = pills[entry.clozeDocIndex];
+      const pAns = normalize(candidate.dataset.clozeAnswer || candidate.textContent);
+      if (pAns === targetAnswer || candidate.dataset.clozeRaw === (entry.clozeFull || entry.raw)) {
+        activePill = candidate;
       }
     }
 
+    // 3. Exact match by entry position in this note's cloze entries
     if (!activePill) {
-      // Find candidate pills with matching answer
+      let targetIdx = clozeEntries.findIndex(e => e.id === entry.id || e.sourceCardId === entry.sourceCardId || (e.recordId && e.recordId === entry.recordId) || e === entry);
+      if (targetIdx >= 0 && pills[targetIdx]) {
+        const pAns = normalize(pills[targetIdx].dataset.clozeAnswer || pills[targetIdx].textContent);
+        if (pAns === targetAnswer || pills[targetIdx].dataset.clozeRaw === (entry.clozeFull || entry.raw)) {
+          activePill = pills[targetIdx];
+        }
+      }
+    }
+
+    // 4. Candidate search preferring closest to targetIdx
+    if (!activePill) {
+      let targetIdx = clozeEntries.findIndex(e => e.id === entry.id || e.sourceCardId === entry.sourceCardId || (e.recordId && e.recordId === entry.recordId) || e === entry);
       const candidates = pills.filter(p => {
         if (entry.clozeFull && p.dataset.clozeRaw === entry.clozeFull) return true;
         return normalize(p.dataset.clozeAnswer || p.textContent) === targetAnswer;
@@ -132,27 +152,51 @@ export class ClozeNoteStudy {
           }
         }
 
-        // Allow clicking on any other cloze to jump to that cloze directly
+        // Allow clicking on any other cloze to jump to that cloze directly without scrolling away
         pill.style.cursor = 'pointer';
         pill.onclick = (e) => {
           e.preventDefault();
           e.stopPropagation();
           const targetCard = clozeEntries[idx];
-          if (targetCard) {
-            const qIdx = this.view.queue.findIndex(it => it.entry.id === targetCard.id || it.entry.sourceCardId === targetCard.sourceCardId || it.entry === targetCard);
-            if (qIdx >= 0) {
-              this.view.position = qIdx;
-              this.view.show();
-            }
+          if (!targetCard || pill === activePill) return;
+
+          // Clear answered state for this card so user can interact immediately
+          if (targetCard.id) this.answeredPills.delete(targetCard.id);
+          if (targetCard.sourceCardId) this.answeredPills.delete(targetCard.sourceCardId);
+          this.answeredPills.delete('idx:' + idx);
+          if (pill.dataset.clozeCardId) this.answeredPills.delete(pill.dataset.clozeCardId);
+          if (pill.dataset.clozeSourceId) this.answeredPills.delete(pill.dataset.clozeSourceId);
+
+          const qIdx = this.view.queue.findIndex(it => 
+            it.entry.id === targetCard.id || 
+            it.entry.sourceCardId === targetCard.sourceCardId || 
+            (it.entry.clozeDocIndex != null && it.entry.clozeDocIndex === targetCard.clozeDocIndex) ||
+            it.entry === targetCard
+          );
+
+          if (qIdx >= 0) {
+            this.view.position = qIdx;
+            this.view.queue[qIdx].revealed = false;
+            this.view.queue[qIdx].draft = '';
+            this.view.show();
+          } else {
+            const newItem = { entry: targetCard, revealed: false, event: null, draft: '', expected: targetCard.record?.revision || 0 };
+            this.view.queue.splice(this.view.position, 0, newItem);
+            this.view.show();
           }
         };
       }
     });
 
-    // Smooth scroll active cloze into view
+    // Smooth scroll active cloze into view only if not currently visible
     setTimeout(() => {
       if (activePill && activePill.isConnected) {
-        activePill.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const rect = activePill.getBoundingClientRect();
+        const containerRect = this.container.getBoundingClientRect();
+        const isVisible = rect.top >= (containerRect.top + 20) && rect.bottom <= (containerRect.bottom - 20);
+        if (!isVisible) {
+          activePill.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
       }
     }, 40);
   }
