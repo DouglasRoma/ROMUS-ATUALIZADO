@@ -10,7 +10,7 @@ const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
 const clone = value => JSON.parse(JSON.stringify(value));
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const namePart = value => String(value).replace(/[\\/:*?"<>|#\[\]\r\n]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100) || 'Sem título';
-const emptyBoard = title => ({ version: 1, title, indexPath: '', nodes: [], edges: [], drawings: [], grid: 'dots', camera: { x: 80, y: 70, z: 1 } });
+const emptyBoard = title => ({ version: 1, title, indexPath: '', nodes: [], edges: [], drawings: [], grid: 'none', camera: { x: 80, y: 70, z: 1 } });
 const safeUrl = raw => { try { const url = new URL(raw); return /^https?:$/.test(url.protocol) && !url.username && !url.password ? url.href : null; } catch { return null; } };
 
 // Bundled offline: ts-fsrs 5.4.2 (MIT), open-spaced-repetition. See vendor/ts-fsrs-LICENSE.
@@ -3844,6 +3844,7 @@ class AtlasView extends TextFileView {
   }
   renderBoard() {
     if (this.invalidData !== null) return;
+    if (!this.board.grid || this.board.grid === 'dots') this.board.grid = 'none';
     if (reconcileAtlasNoteNames(this.board, this.app?.vault, this.plugin?.noteRenames) && this.file) this.requestSave();
     this.areaDraft?.remove(); this.areaDraft = null; this.cancelAreaDrag?.(); this.cancelAreaDrag = null;
     if (this.pendingAreaPin && (this.pendingAreaPin.board !== this.board || !this.board.nodes.includes(this.pendingAreaPin.image) || !this.pendingAreaPin.image.pins.includes(this.pendingAreaPin.pin))) this.pendingAreaPin = null;
@@ -4053,21 +4054,21 @@ class AtlasView extends TextFileView {
   }
   setMode(mode) { this.pendingAreaPin = null; this.pendingMapPin = null; this.mode = this.mode === mode && mode !== 'select' ? 'select' : mode; this.source = null; this.render(); for (const session of this.webSessions?.values() || []) session.reader?.setMarking(this.mode === 'pin'); }
   toggleGrid() {
-    const modes = ['dots', 'lines', 'none'];
-    const current = this.board.grid || 'dots';
+    const modes = ['none', 'dots', 'lines'];
+    const current = this.board.grid || 'none';
     const next = modes[(modes.indexOf(current) + 1) % modes.length];
     this.checkpoint('board');
     this.board.grid = next;
     this.applyGrid();
     this.changed();
-    new Notice(`Grade do quadro: ${next === 'dots' ? 'Pontilhada' : next === 'lines' ? 'Quadriculada' : 'Desativada'}`);
+    new Notice(`Grade do quadro: ${next === 'dots' ? 'Pontilhada' : next === 'lines' ? 'Quadriculada' : 'Desativada (homogênea)'}`);
   }
   applyGrid() {
     if (!this.viewport) return;
-    const grid = this.board.grid || 'dots';
+    const grid = this.board.grid || 'none';
     this.viewport.classList.toggle('has-grid-dots', grid === 'dots');
     this.viewport.classList.toggle('has-grid-lines', grid === 'lines');
-    this.viewport.classList.toggle('has-no-grid', grid === 'none');
+    this.viewport.classList.toggle('has-no-grid', grid === 'none' || !grid);
   }
   drawDrawings() {
     if (!this.drawingsEl) return;
