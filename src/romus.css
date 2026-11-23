@@ -326,3 +326,418 @@ kbd{font-family:var(--font-interface);border:1px solid var(--background-modifier
 .romus-omni-result{contain:layout style;content-visibility:auto;contain-intrinsic-size:auto 82px;transition:none}
 .romus-omni-more{width:100%;margin:8px 0;padding:10px;background:transparent;border-color:var(--background-modifier-border);font-size:12px;color:var(--text-muted)}
 .tiptap [data-atlas-highlight=auto] a,.markdown-preview [data-atlas-highlight=auto] a{color:inherit}
+
+/* ==========================================================================
+   ROMUS Embedded Mind Map Block
+   ========================================================================== */
+
+.romus-mindmap-block-wrapper {
+  margin: 22px 0;
+  max-width: 100%;
+  clear: both;
+  user-select: none;
+}
+
+.romus-embedded-mindmap {
+  position: relative;
+  width: 100%;
+  min-height: 260px;
+  max-height: 1400px;
+  background-color: #111418;
+  border: 1.5px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  outline: none;
+  font-family: var(--font-default, system-ui, sans-serif);
+}
+
+.romus-embedded-mindmap:focus-within {
+  border-color: rgba(56, 189, 248, 0.45);
+}
+
+.romus-embedded-mindmap.is-fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  z-index: 99999 !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+}
+
+/* Toolbar */
+.romus-mindmap-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 10;
+  pointer-events: none;
+  gap: 8px;
+}
+
+.romus-mindmap-tools-left,
+.romus-mindmap-tools-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+  background: rgba(24, 27, 32, 0.88);
+  backdrop-filter: blur(12px);
+  padding: 4px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.romus-mindmap-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #38bdf8;
+  padding-right: 8px;
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.romus-mindmap-badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+.romus-mindmap-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #cbd5e1;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.romus-mindmap-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.romus-mindmap-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.romus-mindmap-btn.icon-only {
+  padding: 4px 6px;
+  min-width: 26px;
+  justify-content: center;
+}
+
+/* Stage / Canvas */
+.romus-mindmap-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  cursor: grab;
+  background-color: #111418;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.romus-mindmap-stage.is-panning {
+  cursor: grabbing !important;
+}
+
+.romus-mindmap-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.romus-mindmap-svg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 1;
+}
+
+.romus-mindmap-nodes {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+}
+
+/* Mind Map Node Pills */
+.romus-mind-node.ia-card.ia-mind {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  border-radius: 24px;
+  border: 1.5px solid var(--ia-mind-color, #38bdf8);
+  background: #181b20;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  user-select: none;
+  cursor: pointer;
+}
+
+.romus-mind-node.ia-card.ia-mind:hover {
+  border-color: var(--ia-mind-color, #38bdf8);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+}
+
+.romus-mind-node.ia-card.ia-mind.is-selected {
+  outline: 2px solid var(--ia-mind-color, #38bdf8) !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6) !important;
+}
+
+.romus-mind-node.ia-card.ia-mind.is-root {
+  border-width: 2px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+}
+
+.romus-mind-node.ia-card.ia-mind.has-subnote {
+  border-radius: 18px;
+}
+
+.romus-mind-node.ia-card.ia-mind.is-relation {
+  border-style: dashed;
+  border-radius: 14px;
+}
+
+.romus-mind-node.ia-card.ia-mind .ia-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 0 14px;
+  gap: 8px;
+  width: 100%;
+  border-radius: 24px;
+}
+
+.romus-mind-node.ia-card.ia-mind.has-subnote .ia-card-head {
+  border-radius: 16px 16px 0 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.romus-mind-node.ia-card.ia-mind .ia-card-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: #f8fafc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.romus-mind-node.ia-card.ia-mind .ia-mind-rename {
+  font-weight: 600;
+  font-size: 13px;
+  color: #ffffff;
+  background: #0f172a;
+  border: 1.5px solid var(--ia-mind-color, #38bdf8);
+  border-radius: 6px;
+  padding: 2px 6px;
+  width: 100%;
+  outline: none;
+}
+
+.romus-mind-node.ia-card.ia-mind .ia-mind-note-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.romus-mind-node.ia-card.ia-mind .ia-mind-note-badge svg {
+  width: 12px;
+  height: 12px;
+}
+
+.romus-mind-node.ia-card.ia-mind .ia-mind-note-badge.is-linked {
+  border-color: rgba(16, 185, 129, 0.4);
+  background: rgba(16, 185, 129, 0.16);
+  color: #34d399;
+}
+
+.romus-mind-node.ia-card.ia-mind .ia-mind-note-badge:hover {
+  background: var(--ia-mind-color, #38bdf8);
+  color: #0f172a;
+}
+
+.romus-mind-node.ia-card.ia-mind .ia-mind-collapse-btn,
+.romus-mind-node.ia-card.ia-mind .ia-mind-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.romus-mind-node.ia-card.ia-mind .ia-mind-collapse-btn svg,
+.romus-mind-node.ia-card.ia-mind .ia-mind-add-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.romus-mind-node.ia-card.ia-mind .ia-mind-collapse-btn:hover,
+.romus-mind-node.ia-card.ia-mind .ia-mind-add-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* Subnotes inside Mind Nodes */
+.romus-mind-node.ia-card.ia-mind .ia-mind-subnote {
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.32);
+  border-radius: 0 0 16px 16px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #94a3b8;
+  cursor: pointer;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.romus-mind-node.ia-card.ia-mind .ia-mind-subnote:hover {
+  color: #e2e8f0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.romus-mind-node.ia-card.ia-mind .ia-mind-subnote-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Bottom Resizer */
+.romus-mindmap-resizer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 12px;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.5), transparent);
+}
+
+.romus-mindmap-resizer-bar {
+  width: 44px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 2px;
+  transition: all 0.15s ease;
+}
+
+.romus-mindmap-resizer:hover .romus-mindmap-resizer-bar {
+  background: #38bdf8;
+  width: 68px;
+}
+
+body.is-resizing-mindmap {
+  cursor: ns-resize !important;
+  user-select: none !important;
+}
+
+/* Code Editor Overlay */
+.romus-mindmap-code-overlay {
+  position: absolute;
+  inset: 0;
+  background: #0f172a;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+}
+
+.romus-mindmap-code-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 10px;
+  font-weight: 600;
+  font-size: 13px;
+  color: #38bdf8;
+}
+
+.romus-mindmap-code-textarea {
+  flex: 1;
+  width: 100%;
+  background: #020617;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 12px;
+  resize: none;
+  outline: none;
+}
+
+.romus-mindmap-code-textarea:focus {
+  border-color: #38bdf8;
+}
+
+/* Subnote modal */
+.romus-mindmap-subnote-modal {
+  width: min(560px, 94vw);
+}
+
+.romus-mindmap-subnote-modal .ia-mind-subnote-textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  min-height: 120px;
+  max-height: 380px;
+  font-size: 13px;
+  line-height: 1.6;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 10px;
+  color: var(--text-normal);
+  outline: none;
+}
+
+.romus-mindmap-subnote-modal .ia-mind-subnote-textarea:focus {
+  border-color: var(--text-accent);
+}
+

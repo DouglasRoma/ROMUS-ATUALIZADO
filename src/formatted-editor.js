@@ -1,9 +1,11 @@
 import {Editor} from '@tiptap/core';
 import {EditorState} from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
+import CodeBlock from '@tiptap/extension-code-block';
 import {Markdown} from '@tiptap/markdown';
 import Link from '@tiptap/extension-link';
 import {noteImage,relativeImage} from './note-image.js';
+import {EmbeddedMindMap} from './embedded-mindmap.js';
 import {TaskList,TaskItem} from '@tiptap/extension-list';
 import {TableKit} from '@tiptap/extension-table';
 import {noteLinkLabel} from './note-link-label.js';
@@ -48,10 +50,59 @@ const NoteLink=Link.extend({renderHTML(props){
  }
  return spec;
 }});
+export function mindmapCodeBlock(owner){
+ return CodeBlock.extend({
+  addNodeView(){
+   return ({node,editor,getPos})=>{
+    if(node.attrs.language==='mindmap'){
+     const wrapper=document.createElement('div');
+     wrapper.className='romus-mindmap-block-wrapper';
+     wrapper.contentEditable='false';
+     let currentText=node.textContent;
+     const updateNodeText=(newJson)=>{
+      currentText=newJson;
+      const pos=getPos();
+      if(typeof pos==='number'&&!editor.isDestroyed){
+       const textNode=editor.schema.text(newJson);
+       const tr=editor.state.tr.replaceWith(pos+1,pos+node.nodeSize-1,textNode);
+       editor.view.dispatch(tr);
+       owner.dirty=true;
+       owner.owner.status.textContent='Salvando…';
+       owner.flushToOwner();
+      }
+     };
+     const mindmap=new EmbeddedMindMap(wrapper,{
+      data:currentText,
+      app:owner.app,
+      onChange:newJson=>updateNodeText(newJson)
+     });
+     return{
+      dom:wrapper,
+      stopEvent:()=>true,
+      ignoreMutation:()=>true,
+      update(next){
+       if(next.type.name!=='codeBlock'||next.attrs.language!=='mindmap')return false;
+       if(mindmap&&next.textContent!==currentText){
+        currentText=next.textContent;
+        mindmap.load(currentText);
+       }
+       return true;
+      },
+      destroy(){mindmap?.destroy()}
+     };
+    }
+    const pre=document.createElement('pre'),code=document.createElement('code');
+    if(node.attrs.language)code.className=`language-${node.attrs.language}`;
+    pre.appendChild(code);
+    return{dom:pre,contentDOM:code};
+   };
+  }
+ });
+}
 export class FormattedEditor{
  constructor(owner,host){
   this.owner=owner;this.app=owner.app;this.host=host;this.managed=[];
-  this.editor=new Editor({element:host,extensions:[StarterKit.configure({link:false}),NoteLink.configure({openOnClick:false,protocols:['atlas-note','atlas-cloze']}),Markdown,noteImage(owner),TaskList,TaskItem.configure({nested:true}),TableKit,TextPaint],content:'',contentType:'markdown',
+  this.editor=new Editor({element:host,extensions:[StarterKit.configure({link:false,codeBlock:false}),mindmapCodeBlock(owner),NoteLink.configure({openOnClick:false,protocols:['atlas-note','atlas-cloze']}),Markdown,noteImage(owner),TaskList,TaskItem.configure({nested:true}),TableKit,TextPaint],content:'',contentType:'markdown',
    editorProps:{attributes:{'aria-label':'Texto formatado da nota',role:'textbox','aria-multiline':'true',spellcheck:'true'},handleKeyDown:(_,event)=>this.onKey(event)},
    onUpdate:()=>{if(this.loading||this.completeWikiLink())return;this.dirty=true;owner.status.textContent='Salvando…';clearTimeout(this.serializeTimer);this.serializeTimer=setTimeout(()=>this.flushToOwner(),280);this.scheduleLinks();this.updateSuggestions();owner.slash?.update();this.bubble?.schedule()},onSelectionUpdate:()=>{this.updateSuggestions();owner.slash?.update();this.bubble?.schedule()},onFocus:()=>this.bubble?.schedule(),onBlur:()=>requestAnimationFrame(()=>{if(!this.editor.isDestroyed)this.bubble?.schedule()})});
   this.bubble=new SelectionToolbar(this);
