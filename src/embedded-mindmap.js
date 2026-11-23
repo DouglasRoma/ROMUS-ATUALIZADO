@@ -377,8 +377,9 @@ export class EmbeddedMindMap {
   load(raw) {
     if (this.inlineRename) return;
     this.data = parseMindmapData(raw);
-    if (!this.data.nodes.some(n => n.id === this.selectedId)) {
-      this.selectedId = this.data.root;
+    const normSelectedId = String(this.selectedId);
+    if (!this.data.nodes.some(n => String(n.id) === normSelectedId)) {
+      this.selectedId = String(this.data.root);
     }
     this.layoutAndRender();
   }
@@ -780,7 +781,7 @@ export class EmbeddedMindMap {
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation?.();
-        const activeNodeId = this.inlineRename.nodeId;
+        const activeNodeId = String(this.inlineRename.nodeId);
         this.inlineRename.finish();
         this.addNode(activeNodeId, false);
         return;
@@ -789,10 +790,10 @@ export class EmbeddedMindMap {
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation?.();
-        const activeNodeId = this.inlineRename.nodeId;
-        const currentNode = this.data.nodes.find(n => n.id === activeNodeId);
+        const activeNodeId = String(this.inlineRename.nodeId);
+        const currentNode = this.data.nodes.find(n => String(n.id) === activeNodeId);
         this.inlineRename.finish();
-        if (currentNode && currentNode.parentId) {
+        if (currentNode && currentNode.parentId && String(currentNode.id) !== String(this.data.root)) {
           this.addNode(currentNode.id, true);
         } else if (currentNode) {
           this.addNode(currentNode.id, false);
@@ -824,11 +825,12 @@ export class EmbeddedMindMap {
       event.stopPropagation();
       event.stopImmediatePropagation?.();
       if (!this.selectedId) {
-        this.selectedId = this.data.root || this.data.nodes[0]?.id;
+        this.selectedId = String(this.data.root || this.data.nodes[0]?.id);
         this.renderSelection();
       }
-      const targetNode = this.data.nodes.find(n => n.id === this.selectedId)
-        || this.data.nodes.find(n => n.id === this.data.root)
+      const normSelectedId = String(this.selectedId);
+      const targetNode = this.data.nodes.find(n => String(n.id) === normSelectedId)
+        || this.data.nodes.find(n => String(n.id) === String(this.data.root))
         || this.data.nodes[0];
       if (targetNode) {
         this.addNode(targetNode.id, false);
@@ -842,14 +844,15 @@ export class EmbeddedMindMap {
       event.stopPropagation();
       event.stopImmediatePropagation?.();
       if (!this.selectedId) {
-        this.selectedId = this.data.root || this.data.nodes[0]?.id;
+        this.selectedId = String(this.data.root || this.data.nodes[0]?.id);
         this.renderSelection();
       }
-      const targetNode = this.data.nodes.find(n => n.id === this.selectedId)
-        || this.data.nodes.find(n => n.id === this.data.root)
+      const normSelectedId = String(this.selectedId);
+      const targetNode = this.data.nodes.find(n => String(n.id) === normSelectedId)
+        || this.data.nodes.find(n => String(n.id) === String(this.data.root))
         || this.data.nodes[0];
       if (targetNode) {
-        if (targetNode.parentId) {
+        if (targetNode.parentId && String(targetNode.id) !== String(this.data.root)) {
           this.addNode(targetNode.id, true);
         } else {
           this.addNode(targetNode.id, false);
@@ -955,11 +958,11 @@ export class EmbeddedMindMap {
       this.selectNode(this.data.root || this.data.nodes[0]?.id);
       return;
     }
-    const current = this.data.nodes.find(n => n.id === this.selectedId);
+    const current = this.data.nodes.find(n => String(n.id) === String(this.selectedId));
     if (!current) return;
 
     if (direction === 'ArrowRight') {
-      const children = this.data.nodes.filter(n => n.parentId === current.id);
+      const children = this.data.nodes.filter(n => String(n.parentId) === String(current.id));
       if (children.length > 0) {
         current.collapsed = false;
         this.layoutAndRender();
@@ -970,14 +973,14 @@ export class EmbeddedMindMap {
         this.selectNode(current.parentId);
       }
     } else if (direction === 'ArrowDown') {
-      const siblings = this.data.nodes.filter(n => n.parentId === current.parentId);
-      const idx = siblings.findIndex(n => n.id === current.id);
+      const siblings = this.data.nodes.filter(n => String(n.parentId) === String(current.parentId));
+      const idx = siblings.findIndex(n => String(n.id) === String(current.id));
       if (idx !== -1 && idx < siblings.length - 1) {
         this.selectNode(siblings[idx + 1].id);
       }
     } else if (direction === 'ArrowUp') {
-      const siblings = this.data.nodes.filter(n => n.parentId === current.parentId);
-      const idx = siblings.findIndex(n => n.id === current.id);
+      const siblings = this.data.nodes.filter(n => String(n.parentId) === String(current.parentId));
+      const idx = siblings.findIndex(n => String(n.id) === String(current.id));
       if (idx > 0) {
         this.selectNode(siblings[idx - 1].id);
       }
@@ -1164,7 +1167,7 @@ export class EmbeddedMindMap {
   createNodeElement(node) {
     const el = document.createElement('div');
     el.className = 'ia-card ia-mind romus-mind-node';
-    el.dataset.nodeId = node.id;
+    el.dataset.nodeId = String(node.id);
 
     const head = el.createDiv({ cls: 'ia-card-head' });
 
@@ -1198,11 +1201,23 @@ export class EmbeddedMindMap {
     const subnoteBox = el.createDiv({ cls: 'ia-mind-subnote' });
     subnoteBox.createDiv({ cls: 'ia-mind-subnote-text' });
 
-    // Events
-    el.onpointerdown = e => {
-      e.stopPropagation();
+    // Events: click or pointerdown anywhere on the card or head selects this node immediately
+    const selectThisNode = (e) => {
+      e?.stopPropagation?.();
       this.setFocused(true);
       this.selectNode(node.id, true);
+    };
+
+    el.onpointerdown = selectThisNode;
+    el.onclick = selectThisNode;
+
+    head.onpointerdown = e => {
+      if (e.target?.closest?.('.romus-mind-node-controls, input')) return;
+      selectThisNode(e);
+    };
+    head.onclick = e => {
+      if (e.target?.closest?.('.romus-mind-node-controls, input')) return;
+      selectThisNode(e);
     };
 
     el.ondblclick = e => {
@@ -1246,13 +1261,17 @@ export class EmbeddedMindMap {
 
   updateNodeElement(el, pos) {
     const node = pos.node;
+    const normSelectedId = String(this.selectedId);
+    const normNodeId = String(node.id);
+    const normRootId = String(this.data.root);
+
     el.style.left = `${pos.x}px`;
     el.style.top = `${pos.y}px`;
     el.style.width = `${pos.w}px`;
     el.style.setProperty('--ia-mind-color', node.color || MINDMAP_COLORS[0]);
 
-    el.classList.toggle('is-selected', this.selectedId === node.id);
-    el.classList.toggle('is-root', node.id === this.data.root);
+    el.classList.toggle('is-selected', normSelectedId === normNodeId);
+    el.classList.toggle('is-root', normNodeId === normRootId);
     el.classList.toggle('has-subnote', Boolean(node.body));
     el.classList.toggle('is-relation', Boolean(node.relation));
 
@@ -1270,7 +1289,7 @@ export class EmbeddedMindMap {
         if (badgeLabel) badgeLabel.textContent = node.body ? 'Nota' : '+ Nota';
       }
 
-      const hasChildren = this.data.nodes.some(n => n.parentId === node.id);
+      const hasChildren = this.data.nodes.some(n => String(n.parentId) === normNodeId);
       const collapseBtn = controls ? controls.querySelector('.ia-mind-collapse-btn') : head.querySelector('.ia-mind-collapse-btn');
       if (collapseBtn) {
         collapseBtn.style.display = hasChildren ? 'inline-flex' : 'none';
@@ -1288,12 +1307,13 @@ export class EmbeddedMindMap {
   }
 
   selectNode(id, focusContainer = true) {
-    if (this.inlineRename && this.inlineRename.nodeId !== id) {
+    const normId = String(id);
+    if (this.inlineRename && String(this.inlineRename.nodeId) !== normId) {
       this.inlineRename.finish();
     }
-    this.selectedId = id;
+    this.selectedId = normId;
     for (const [nodeId, el] of this.nodeElements.entries()) {
-      el.classList.toggle('is-selected', nodeId === id);
+      el.classList.toggle('is-selected', String(nodeId) === normId);
     }
     if (focusContainer) {
       this.setFocused(true);
@@ -1301,34 +1321,100 @@ export class EmbeddedMindMap {
         this.container.focus({ preventScroll: true });
       }
     }
+    this.ensureNodeVisible(normId);
+  }
+
+  findSubtreeEndIndex(node) {
+    const descendantIds = new Set([String(node.id)]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const n of this.data.nodes) {
+        if (n.parentId && descendantIds.has(String(n.parentId)) && !descendantIds.has(String(n.id))) {
+          descendantIds.add(String(n.id));
+          changed = true;
+        }
+      }
+    }
+    let lastIdx = this.data.nodes.findIndex(n => String(n.id) === String(node.id));
+    for (let i = this.data.nodes.length - 1; i >= 0; i--) {
+      if (descendantIds.has(String(this.data.nodes[i].id))) {
+        return i;
+      }
+    }
+    return lastIdx !== -1 ? lastIdx : this.data.nodes.length - 1;
+  }
+
+  ensureNodeVisible(nodeId) {
+    if (!this.lastLayoutResult || !this.stage) return;
+    const pos = this.lastLayoutResult.positions.get(String(nodeId));
+    if (!pos) return;
+
+    const stageW = this.stage.offsetWidth || this.container?.offsetWidth || 600;
+    const stageH = this.stage.offsetHeight || this.container?.offsetHeight || 400;
+    const z = this.camera?.z || 1.0;
+
+    const screenX = this.camera.x + pos.x * z;
+    const screenY = this.camera.y + pos.y * z;
+    const screenW = pos.w * z;
+    const screenH = pos.h * z;
+
+    const pad = 40;
+    let dx = 0;
+    let dy = 0;
+
+    if (screenY + screenH > stageH - pad) {
+      dy = (stageH - pad) - (screenY + screenH);
+    } else if (screenY < pad + 36) {
+      dy = (pad + 36) - screenY;
+    }
+
+    if (screenX + screenW > stageW - pad) {
+      dx = (stageW - pad) - (screenX + screenW);
+    } else if (screenX < pad) {
+      dx = pad - screenX;
+    }
+
+    if (dx !== 0 || dy !== 0) {
+      this.camera.x += dx;
+      this.camera.y += dy;
+      this.applyCamera();
+    }
   }
 
   addNode(parentId, sibling = false, relation = false) {
     if (this.readOnly) return;
     this.inlineRename?.finish();
 
-    const current = this.data.nodes.find(n => n.id === parentId);
-    let parent = null;
+    const targetRefId = String(parentId || this.selectedId || this.data.root);
+    const current = this.data.nodes.find(n => String(n.id) === targetRefId)
+      || this.data.nodes.find(n => String(n.id) === String(this.data.root))
+      || this.data.nodes[0];
+
+    if (!current) return;
+
+    const isRoot = String(current.id) === String(this.data.root);
+    let actualParent = null;
 
     if (sibling) {
-      if (current && current.parentId) {
-        parent = this.data.nodes.find(n => n.id === current.parentId);
-      } else {
+      if (!isRoot && current.parentId) {
+        actualParent = this.data.nodes.find(n => String(n.id) === String(current.parentId));
+      }
+      if (!actualParent) {
         // Root has no sibling; add child of root instead
-        parent = current || this.data.nodes.find(n => n.id === this.data.root);
+        actualParent = this.data.nodes.find(n => String(n.id) === String(this.data.root)) || current;
       }
     } else {
-      parent = current || this.data.nodes.find(n => n.id === this.data.root);
+      actualParent = current;
     }
 
-    const actualParent = parent || this.data.nodes.find(n => n.id === this.data.root) || this.data.nodes[0];
     if (!actualParent) return;
 
     const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
     let color;
-    if (actualParent.id === this.data.root) {
-      const childCount = this.data.nodes.filter(n => n.parentId === actualParent.id).length;
+    if (String(actualParent.id) === String(this.data.root)) {
+      const childCount = this.data.nodes.filter(n => String(n.parentId) === String(actualParent.id)).length;
       color = MINDMAP_COLORS[(childCount) % MINDMAP_COLORS.length];
     } else {
       color = actualParent.color || MINDMAP_COLORS[0];
@@ -1337,7 +1423,7 @@ export class EmbeddedMindMap {
     const defaultTitle = relation ? 'Relação' : 'Novo tópico';
     const newNode = {
       id: newId,
-      parentId: actualParent.id,
+      parentId: String(actualParent.id),
       title: defaultTitle,
       color,
       body: '',
@@ -1346,9 +1432,18 @@ export class EmbeddedMindMap {
     };
 
     actualParent.collapsed = false;
-    this.data.nodes.push(newNode);
-    this.selectedId = newId;
+
+    if (sibling && !isRoot) {
+      const insertIdx = this.findSubtreeEndIndex(current) + 1;
+      this.data.nodes.splice(insertIdx, 0, newNode);
+    } else {
+      const insertIdx = this.findSubtreeEndIndex(actualParent) + 1;
+      this.data.nodes.splice(insertIdx, 0, newNode);
+    }
+
+    this.selectedId = String(newId);
     this.layoutAndRender();
+    this.ensureNodeVisible(newId);
 
     // Immediately open inline rename with input focused and ready to type
     this.renameNodeInline(newId, true);
@@ -1422,7 +1517,7 @@ export class EmbeddedMindMap {
         e.preventDefault();
         e.stopPropagation();
         commit();
-        if (node.parentId) {
+        if (node.parentId && String(node.id) !== String(this.data.root)) {
           this.addNode(node.id, true);
         } else {
           this.addNode(node.id, false);
@@ -1467,7 +1562,8 @@ export class EmbeddedMindMap {
 
   editSubnote(nodeId) {
     if (this.readOnly) return;
-    const node = this.data.nodes.find(n => n.id === nodeId);
+    const normId = String(nodeId);
+    const node = this.data.nodes.find(n => String(n.id) === normId);
     if (!node) return;
 
     new MindSubnoteModal(this.app, node, newBody => {
@@ -1478,7 +1574,8 @@ export class EmbeddedMindMap {
   }
 
   toggleCollapse(nodeId) {
-    const node = this.data.nodes.find(n => n.id === nodeId);
+    const normId = String(nodeId);
+    const node = this.data.nodes.find(n => String(n.id) === normId);
     if (!node) return;
     node.collapsed = !node.collapsed;
     this.layoutAndRender();
@@ -1487,35 +1584,37 @@ export class EmbeddedMindMap {
 
   deleteNode(nodeId) {
     if (this.readOnly) return;
-    if (nodeId === this.data.root) {
+    const normId = String(nodeId);
+    if (normId === String(this.data.root)) {
       new Notice('Não é possível excluir o tópico central.');
       return;
     }
 
-    const node = this.data.nodes.find(n => n.id === nodeId);
+    const node = this.data.nodes.find(n => String(n.id) === normId);
     if (!node) return;
 
     // Collect all descendants recursively
-    const toDelete = new Set([nodeId]);
+    const toDelete = new Set([normId]);
     let added = true;
     while (added) {
       added = false;
       for (const n of this.data.nodes) {
-        if (n.parentId && toDelete.has(n.parentId) && !toDelete.has(n.id)) {
-          toDelete.add(n.id);
+        if (n.parentId && toDelete.has(String(n.parentId)) && !toDelete.has(String(n.id))) {
+          toDelete.add(String(n.id));
           added = true;
         }
       }
     }
 
-    this.data.nodes = this.data.nodes.filter(n => !toDelete.has(n.id));
-    this.selectedId = node.parentId || this.data.root;
+    this.data.nodes = this.data.nodes.filter(n => !toDelete.has(String(n.id)));
+    this.selectedId = String(node.parentId || this.data.root);
     this.layoutAndRender();
     this.emitChange();
   }
 
   showContextMenu(nodeId, event) {
-    const node = this.data.nodes.find(n => n.id === nodeId);
+    const normId = String(nodeId);
+    const node = this.data.nodes.find(n => String(n.id) === normId);
     if (!node) return;
 
     const menu = new Menu();

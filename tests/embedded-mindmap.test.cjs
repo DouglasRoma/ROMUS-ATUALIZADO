@@ -469,3 +469,118 @@ test('EmbeddedMindMap: focus button and total isolation from Tab cycling', async
     global.document = origDoc;
   }
 });
+
+test('EmbeddedMindMap: adding sibling to node with children places it as sibling underneath, not child', async () => {
+  const origDoc = global.document;
+  const makeEl = (tag, o = {}) => {
+    let _val = o.value !== undefined ? o.value : '';
+    const el = {
+      tagName: (tag || 'DIV').toUpperCase(),
+      dataset: {},
+      get value() { return _val; },
+      set value(v) { _val = v; },
+      placeholder: o.attr?.placeholder || '',
+      tabIndex: o.attr?.tabindex !== undefined ? parseInt(o.attr.tabindex, 10) : 0,
+      isConnected: true,
+      classList: { add() {}, remove() {}, toggle() {} },
+      style: { setProperty() {} },
+      createSpan: (opts) => makeEl('span', opts),
+      createDiv: (opts) => makeEl('div', opts),
+      createEl: (t, opts) => makeEl(t, opts),
+      appendChild: () => ({}),
+      setAttribute: (k, v) => { el[k] = v; },
+      replaceChildren: () => {},
+      remove: () => { el.isConnected = false; },
+      focus: () => {},
+      select: () => { el.selected = true; },
+      setSelectionRange: () => {},
+      querySelector: () => makeEl('div'),
+      querySelectorAll: () => [],
+      getContext: () => ({
+        measureText: (t) => ({ width: (t || '').length * 8.5 })
+      })
+    };
+    return el;
+  };
+
+  global.document = {
+    createElement: makeEl,
+    createElementNS: makeEl
+  };
+
+  const { EmbeddedMindMap } = await import('../src/embedded-mindmap.js');
+
+  const containerListeners = {};
+  const container = {
+    classList: { add() {}, remove() {}, toggle() {} },
+    style: {},
+    createDiv: () => makeEl('div'),
+    addEventListener: (evt, fn) => { containerListeners[evt] = fn; },
+    focus: () => {},
+    closest: () => null
+  };
+
+  try {
+    const map = new EmbeddedMindMap(container, {
+      data: JSON.stringify({
+        root: '1',
+        nodes: [
+          { id: '1', title: 'Tópico Central' },
+          { id: '2', parentId: '1', title: 'L1' },
+          { id: '3', parentId: '2', title: 'L2' },
+          { id: '4', parentId: '3', title: 'L3-top' },
+          { id: '5', parentId: '3', title: 'L3-bottom' },
+          { id: 'c1', parentId: '5', title: 'Child 1' },
+          { id: 'c2', parentId: '5', title: 'Child 2' }
+        ]
+      })
+    });
+
+    // Select node '5' (L3-bottom) which already has children
+    map.selectNode('5');
+    assert.equal(map.selectedId, '5');
+
+    // Add sibling to node '5'
+    const siblingNode = map.addNode('5', true);
+    assert.ok(siblingNode, 'Nó irmão deve ser criado');
+    assert.equal(siblingNode.parentId, '3', 'O pai do irmão de 5 deve ser 3 (L2), NUNCA 5!');
+    assert.notEqual(siblingNode.parentId, '5', 'Irmão de 5 NUNCA pode ter parentId = 5');
+
+    // Verify splicing index: sibling of 5 must be placed after 5 and all its children (c1, c2)
+    const idx5 = map.data.nodes.findIndex(n => n.id === '5');
+    const idxC1 = map.data.nodes.findIndex(n => n.id === 'c1');
+    const idxC2 = map.data.nodes.findIndex(n => n.id === 'c2');
+    const idxSib = map.data.nodes.findIndex(n => n.id === siblingNode.id);
+
+    assert.ok(idxSib > idx5, 'Irmão deve vir após o nó 5');
+    assert.ok(idxSib > idxC2, 'Irmão deve vir após a subárvore inteira do nó 5');
+
+    // Verify layout: siblingNode depth is 3 (same level as 5), NOT depth 4 (child level)
+    const layout = map.lastLayoutResult;
+    const pos5 = layout.positions.get('5');
+    const posSib = layout.positions.get(siblingNode.id);
+    assert.equal(posSib.depth, 3, 'Profundidade do irmão deve ser 3 (mesmo nível de 5)');
+    assert.equal(posSib.depth, pos5.depth, 'Profundidade deve ser igual à de 5');
+    assert.ok(posSib.y > pos5.y, 'Irmão deve ser posicionado verticalmente abaixo de 5');
+
+    // Test Enter key on selected node via handleWindowKeydown
+    map.selectNode('4'); // L3-top
+    map.inlineRename?.finish();
+    assert.equal(map.selectedId, '4');
+
+    containerListeners['keydown']({
+      key: 'Enter',
+      preventDefault() {},
+      stopPropagation() {},
+      stopImmediatePropagation() {}
+    });
+
+    assert.ok(map.inlineRename, 'Enter deve criar novo nó e abrir renomeação inline');
+    const newSibId = map.inlineRename.nodeId;
+    const newSibNode = map.data.nodes.find(n => n.id === newSibId);
+    assert.equal(newSibNode.parentId, '3', 'Enter em L3-top deve criar nó irmão com pai L2');
+    assert.equal(map.data.nodes.indexOf(newSibNode), map.data.nodes.findIndex(n => n.id === '4') + 1, 'Novo irmão deve ser inserido logo após 4');
+  } finally {
+    global.document = origDoc;
+  }
+});
