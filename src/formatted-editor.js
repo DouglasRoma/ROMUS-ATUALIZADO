@@ -63,18 +63,35 @@ export function mindmapCodeBlock(owner){
       currentText=newJson;
       const pos=getPos();
       if(typeof pos==='number'&&!editor.isDestroyed){
-       const textNode=editor.schema.text(newJson);
-       const tr=editor.state.tr.replaceWith(pos+1,pos+node.nodeSize-1,textNode);
-       editor.view.dispatch(tr);
-       owner.dirty=true;
-       owner.owner.status.textContent='Salvando…';
-       owner.flushToOwner();
+       const currentNode=editor.state.doc.nodeAt(pos);
+       if(currentNode&&currentNode.type.name==='codeBlock'){
+        const content=newJson?editor.schema.text(newJson):[];
+        const tr=editor.state.tr.replaceWith(pos+1,pos+currentNode.nodeSize-1,content);
+        editor.view.dispatch(tr);
+        owner.dirty=true;
+        owner.owner.status.textContent='Salvando…';
+        owner.flushToOwner();
+       }
+      }
+     };
+     const removeBlock=()=>{
+      const pos=getPos();
+      if(typeof pos==='number'&&!editor.isDestroyed){
+       const currentNode=editor.state.doc.nodeAt(pos);
+       if(currentNode){
+        const tr=editor.state.tr.delete(pos,pos+currentNode.nodeSize);
+        editor.view.dispatch(tr);
+        owner.dirty=true;
+        owner.owner.status.textContent='Salvando…';
+        owner.flushToOwner();
+       }
       }
      };
      const mindmap=new EmbeddedMindMap(wrapper,{
       data:currentText,
       app:owner.app,
-      onChange:newJson=>updateNodeText(newJson)
+      onChange:newJson=>updateNodeText(newJson),
+      onRemove:()=>removeBlock()
      });
      return{
       dom:wrapper,

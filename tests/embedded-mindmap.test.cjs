@@ -135,3 +135,48 @@ test('EditorSlashMenu: supports /mindmap and /mapa queries', async () => {
   assert.ok(code.includes('mapa'), 'Deve conter alias mapa');
   assert.ok(code.includes('git-fork'), 'Deve usar ícone git-fork');
 });
+
+test('EmbeddedMindMap: parseMindmapData never parses JSON keys as outline nodes even with code fences', async () => {
+  const { parseMindmapData } = await import('../src/embedded-mindmap.js');
+
+  const fencedJson = [
+    '```mindmap',
+    '{',
+    '  "root": "1",',
+    '  "height": 400,',
+    '  "nodes": [',
+    '    { "id": "1", "title": "Tópico Central", "color": "#38bdf8" },',
+    '    { "id": "2", "parentId": "1", "title": "Subtópico 1", "color": "#34d399" },',
+    '    { "id": "3", "parentId": "1", "title": "Subtópico 2", "color": "#f59e0b" }',
+    '  ]',
+    '}',
+    '```'
+  ].join('\n');
+
+  const data = parseMindmapData(fencedJson);
+  assert.equal(data.nodes.length, 3, 'Deve conter exatamente os 3 nós do JSON');
+  assert.equal(data.nodes[0].title, 'Tópico Central');
+  assert.equal(data.nodes[1].title, 'Subtópico 1');
+  assert.equal(data.nodes[2].title, 'Subtópico 2');
+
+  // Verify that JSON keys are NEVER created as nodes
+  const nodeTitles = data.nodes.map(n => n.title);
+  assert.ok(!nodeTitles.includes('root'), 'Não deve criar nó para a chave "root"');
+  assert.ok(!nodeTitles.includes('height'), 'Não deve criar nó para a chave "height"');
+  assert.ok(!nodeTitles.includes('{'), 'Não deve criar nó para "{"');
+  assert.ok(!nodeTitles.includes('}'), 'Não deve criar nó para "}"');
+});
+
+test('EmbeddedMindMap: calculateNodeSize guarantees room for full text and controls without 480px limit', async () => {
+  const { calculateNodeSize } = await import('../src/embedded-mindmap.js');
+
+  const longTitleNode = {
+    id: '1',
+    title: 'Fisiopatologia da resposta imune celular mediada por linfócitos T CD4 e CD8 na infecção crônica',
+    color: '#38bdf8'
+  };
+
+  const size = calculateNodeSize(longTitleNode, true);
+  assert.ok(size.w > 480, 'Nó com título longo deve ultrapassar 480px para não cortar texto');
+  assert.ok(size.pillH >= 36, 'Altura da pílula deve acomodar a tipografia');
+});

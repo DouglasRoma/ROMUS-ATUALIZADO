@@ -101,6 +101,35 @@ export const MarkdownRenderer={async render(app,text,el,source,component,options
    const mindmap=new EmbeddedMindMap(container,{
     data:rawText,
     app,
+    onRemove:async ()=>{
+     if(source){
+      const file=app.vault?.getAbstractFileByPath?.(source)||(app.vault?.getFiles?.()||[]).find(f=>f.path===source);
+      if(file){
+       const content=await app.vault.read(file);
+       let updated=content;
+       const oldFence='```mindmap\n'+rawText.trim()+'\n```';
+       if(content.includes(oldFence)){
+        updated=content.replace(oldFence,'');
+       }else if(content.includes(rawText.trim())){
+        updated=content.replace(rawText.trim(),'');
+       }else if(/```mindmap[\s\S]*?```/.test(content)){
+        updated=content.replace(/```mindmap[\s\S]*?```/,'');
+       }
+       if(updated!==content){
+        await app.vault.modify(file,updated);
+        container.remove();
+        const leaf=app.workspace?.getLeavesOfType?.('markdown')?.find(l=>l.view?.file?.path===source)||app.workspace?.activeLeaf;
+        if(leaf?.view?.file?.path===source&&typeof leaf.view.refreshContent==='function'){
+         const bodyOnly=updated.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/,'').replace(/^(?:---\r?\n)+/,'');
+         leaf.view.input.value=bodyOnly;
+         if(leaf.view.formatted)leaf.view.formatted.load(bodyOnly);
+        }
+       }
+      }
+     }else{
+      container.remove();
+     }
+    },
     onChange:async newJson=>{
      if(source){
       const file=app.vault?.getAbstractFileByPath?.(source)||(app.vault?.getFiles?.()||[]).find(f=>f.path===source);

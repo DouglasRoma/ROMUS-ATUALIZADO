@@ -14,11 +14,39 @@ export class EditorSlashMenu{
  paint(){[...this.menu.querySelectorAll('button')].forEach((button,index)=>button.setAttribute('aria-selected',String(index===this.index)));this.menu.querySelector('[aria-selected=true]')?.scrollIntoView({block:'nearest'})}
  choose(index){const id=this.items[index]?.[3],range=this.range,owner=this.owner;this.close();if(!id||range.mode!==owner.editorMode)return;
   if(id==='mindmap'){
-   const defaultMap=['```mindmap','{','  "root": "1",','  "height": 400,','  "nodes": [','    { "id": "1", "title": "Tópico Central", "color": "#38bdf8" },','    { "id": "2", "parentId": "1", "title": "Subtópico 1", "color": "#34d399" },','    { "id": "3", "parentId": "1", "title": "Subtópico 2", "color": "#f59e0b" }','  ]','}','```',''].join('\n');
+   const defaultJson = JSON.stringify({
+     root: '1',
+     height: 400,
+     nodes: [
+       { id: '1', title: 'Tópico Central', color: '#38bdf8' },
+       { id: '2', parentId: '1', title: 'Subtópico 1', color: '#34d399' },
+       { id: '3', parentId: '1', title: 'Subtópico 2', color: '#f59e0b' }
+     ]
+   }, null, 2);
    if(range.mode==='formatted'){
-    const raw=defaultMap.replace(/^```mindmap\r?\n|\r?\n```\s*$/g,'');
-    owner.formatted.editor.chain().focus().deleteRange({from:range.from,to:range.to}).setCodeBlock({language:'mindmap'}).insertContent(raw).run();
+    const editor=owner.formatted.editor;
+    const schema=editor.schema;
+    const codeBlockType=schema.nodes.codeBlock;
+    if(codeBlockType){
+     const textNode=schema.text(defaultJson);
+     const mindmapNode=codeBlockType.create({language:'mindmap'},textNode);
+     const {state}=editor;
+     const $from=state.doc.resolve(Math.min(range.from,state.doc.content.size));
+     const parent=$from.parent;
+     const matchText=parent.textBetween(0,parent.content.size);
+     const slashText=state.doc.textBetween(range.from,range.to);
+     if(parent.isTextblock&&matchText.trim()===slashText.trim()){
+      const from=$from.before();
+      const to=$from.after();
+      editor.chain().focus().deleteRange({from,to}).insertContentAt(from,mindmapNode).run();
+     }else{
+      editor.chain().focus().deleteRange({from:range.from,to:range.to}).insertContentAt(range.from,mindmapNode).run();
+     }
+     owner.formatted.dirty=true;
+     owner.formatted.flushToOwner();
+    }
    }else{
+    const defaultMap='```mindmap\n'+defaultJson+'\n```\n';
     owner.sourceInput.setRangeText(defaultMap,range.from,range.to,'end');
     owner.sourceInput.dispatchEvent(new Event('input',{bubbles:true}));
     owner.sourceInput.focus();

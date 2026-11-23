@@ -13,7 +13,7 @@ export const MINDMAP_COLORS = [
 
 let measureCanvasCtx = null;
 export function measureTextWidth(text, font = '600 13px system-ui, -apple-system, sans-serif') {
-  if (typeof document === 'undefined') return Math.max(30, (text || '').length * 8);
+  if (typeof document === 'undefined') return Math.max(30, (text || '').length * 8.5);
   if (!measureCanvasCtx) {
     const canvas = document.createElement('canvas');
     measureCanvasCtx = canvas.getContext('2d');
@@ -37,13 +37,20 @@ export function parseMindmapData(raw) {
   };
 
   if (!raw || typeof raw !== 'string') return defaultMap;
-  const trimmed = raw.trim();
-  if (!trimmed) return defaultMap;
+  let text = raw.trim();
+  if (!text) return defaultMap;
 
-  // Try JSON parsing
-  if (trimmed.startsWith('{')) {
+  // 1. Strip markdown code fences if present (```mindmap ... ``` or ~~~mindmap ... ~~~)
+  text = text.replace(/^```[^\n]*\r?\n|^~~~[^\n]*\r?\n/i, '');
+  text = text.replace(/\r?\n```\s*$|\r?\n~~~\s*$/g, '').trim();
+
+  // 2. Locate outermost JSON object if present
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    const candidate = text.slice(firstBrace, lastBrace + 1);
     try {
-      const data = JSON.parse(trimmed);
+      const data = JSON.parse(candidate);
       if (Array.isArray(data.nodes) && data.nodes.length) {
         if (!data.root) data.root = data.nodes[0].id;
         if (!data.height) data.height = 400;
@@ -52,16 +59,17 @@ export function parseMindmapData(raw) {
     } catch {}
   }
 
-  // Try parsing Markdown Outline / Indented List
-  const lines = trimmed.split(/\r?\n/).filter(l => l.trim().length > 0);
-  if (!lines.length) return defaultMap;
+  // 3. Fallback to Markdown indented list ONLY if lines start with bullets/headers
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
+  const isOutline = lines.some(l => /^\s*(?:[-*+]|\d+\.|\#{1,6})\s+/.test(l));
+  if (!isOutline) return defaultMap;
 
   const nodes = [];
   const parentStack = [];
   let rootId = '1';
 
   lines.forEach((line, index) => {
-    const match = line.match(/^(\s*)(?:[-*+]|\d+\.|\#{1,6})?\s*(.*)$/);
+    const match = line.match(/^(\s*)(?:[-*+]|\d+\.|\#{1,6})\s+(.*)$/);
     if (!match) return;
     const indent = match[1].replace(/\t/g, '  ').length;
     const title = match[2].trim() || `Tópico ${index + 1}`;
@@ -117,13 +125,13 @@ export function calculateNodeSize(node, hasChildren) {
   if (node.relation) {
     const text = node.title || 'Relação';
     const textW = measureTextWidth(text, '600 12px system-ui, -apple-system, sans-serif');
-    return { w: Math.max(80, Math.min(320, Math.ceil(textW) + 32)), h: 26, pillH: 26, bodyH: 0 };
+    return { w: Math.max(90, Math.ceil(textW) + 40), h: 28, pillH: 28, bodyH: 0 };
   }
 
   const titleText = node.title || (node.parentId ? 'Novo tópico' : 'Tópico Central');
   const titleW = measureTextWidth(titleText, '600 13px system-ui, -apple-system, sans-serif');
-  const extraControls = (hasChildren ? 24 : 0) + 115;
-  const pillW = Math.max(150, Math.min(480, Math.ceil(titleW + extraControls)));
+  const controlsW = (hasChildren ? 32 : 0) + 162;
+  const pillW = Math.max(170, Math.ceil(titleW + controlsW));
   const pillH = node.parentId ? 36 : 40;
 
   let bodyH = 0;
@@ -135,9 +143,9 @@ export function calculateNodeSize(node, hasChildren) {
       const lw = measureTextWidth(line, '400 12px system-ui, -apple-system, sans-serif');
       if (lw > maxLineW) maxLineW = lw;
     }
-    bodyW = Math.max(180, Math.min(480, Math.ceil(maxLineW) + 26));
+    bodyW = Math.max(200, Math.ceil(maxLineW) + 32);
     const lineCount = lines.reduce((acc, l) => acc + Math.max(1, Math.ceil((l.length || 1) / 38)), 0);
-    bodyH = Math.min(260, Math.max(32, lineCount * 19 + 16));
+    bodyH = Math.min(320, Math.max(34, lineCount * 20 + 18));
   }
 
   const w = Math.max(pillW, bodyW);
@@ -351,10 +359,10 @@ export class EmbeddedMindMap {
     this.panState = null;
     this.nodeElements = new Map();
     this.inlineRename = null;
+    this._fullscreenEscHandler = null;
 
     this.initDOM();
     this.layoutAndRender();
-    // Auto-fit initial view smoothly
     requestAnimationFrame(() => this.fitToView(true));
   }
 
@@ -431,12 +439,23 @@ export class EmbeddedMindMap {
     setIcon(zoomInBtn, 'plus');
     zoomInBtn.onclick = () => this.zoom(1.18);
 
-    const fullscreenBtn = rightTools.createEl('button', {
+    // Fullscreen Toggle Button
+    const fullscreenBtn = this.fullscreenBtn = rightTools.createEl('button', {
       cls: 'romus-mindmap-btn icon-only',
       attr: { title: 'Expandir / Tela cheia', 'aria-label': 'Tela cheia' }
     });
     setIcon(fullscreenBtn, 'expand');
     fullscreenBtn.onclick = () => this.toggleFullscreen();
+
+    // Close Fullscreen Button (prominent in fullscreen)
+    const closeFullscreenBtn = this.closeFullscreenBtn = rightTools.createEl('button', {
+      cls: 'romus-mindmap-btn romus-mindmap-close-fullscreen-btn',
+      attr: { title: 'Sair da tela cheia (Esc)', 'aria-label': 'Sair da tela cheia' }
+    });
+    setIcon(closeFullscreenBtn, 'x');
+    closeFullscreenBtn.createSpan({ text: 'Sair da tela cheia (Esc)' });
+    closeFullscreenBtn.style.display = 'none';
+    closeFullscreenBtn.onclick = () => this.exitFullscreen();
 
     const codeBtn = rightTools.createEl('button', {
       cls: 'romus-mindmap-btn icon-only',
@@ -444,6 +463,20 @@ export class EmbeddedMindMap {
     });
     setIcon(codeBtn, 'code');
     codeBtn.onclick = () => this.toggleCodeOverlay();
+
+    // Delete Entire Mind Map from Note
+    if (!this.readOnly && typeof this.options.onRemove === 'function') {
+      const deleteMapBtn = rightTools.createEl('button', {
+        cls: 'romus-mindmap-btn romus-mindmap-delete-btn icon-only',
+        attr: { title: 'Remover mapa mental da nota', 'aria-label': 'Remover mapa mental' }
+      });
+      setIcon(deleteMapBtn, 'trash-2');
+      deleteMapBtn.onclick = () => {
+        if (confirm('Deseja realmente remover este mapa mental da nota?')) {
+          this.options.onRemove();
+        }
+      };
+    }
 
     // Stage & Viewport
     const stage = this.stage = this.container.createDiv({ cls: 'romus-mindmap-stage' });
@@ -673,9 +706,44 @@ export class EmbeddedMindMap {
     this.world.style.transform = `translate(${this.camera.x}px, ${this.camera.y}px) scale(${this.camera.z})`;
   }
 
-  toggleFullscreen() {
-    const isFull = this.container.classList.toggle('is-fullscreen');
+  toggleFullscreen(forceState) {
+    const isFull = typeof forceState === 'boolean'
+      ? this.container.classList.toggle('is-fullscreen', forceState)
+      : this.container.classList.toggle('is-fullscreen');
+
+    if (isFull) {
+      if (this.closeFullscreenBtn) this.closeFullscreenBtn.style.display = 'inline-flex';
+      if (this.fullscreenBtn) {
+        setIcon(this.fullscreenBtn, 'minimize-2');
+        this.fullscreenBtn.title = 'Restaurar tamanho normal (Esc)';
+      }
+      if (!this._fullscreenEscHandler) {
+        this._fullscreenEscHandler = (e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            this.exitFullscreen();
+          }
+        };
+        window.addEventListener('keydown', this._fullscreenEscHandler, true);
+      }
+    } else {
+      if (this.closeFullscreenBtn) this.closeFullscreenBtn.style.display = 'none';
+      if (this.fullscreenBtn) {
+        setIcon(this.fullscreenBtn, 'expand');
+        this.fullscreenBtn.title = 'Expandir / Tela cheia';
+      }
+      if (this._fullscreenEscHandler) {
+        window.removeEventListener('keydown', this._fullscreenEscHandler, true);
+        this._fullscreenEscHandler = null;
+      }
+    }
+
     setTimeout(() => this.fitToView(), 60);
+  }
+
+  exitFullscreen() {
+    this.toggleFullscreen(false);
   }
 
   layoutAndRender() {
@@ -748,18 +816,21 @@ export class EmbeddedMindMap {
     // Title label
     head.createSpan({ cls: 'ia-card-title', text: node.title });
 
+    // Controls wrapper (aligned to right)
+    const controls = head.createDiv({ cls: 'romus-mind-node-controls' });
+
     // Subnote (+ Nota) button
-    const noteBadge = head.createSpan({ cls: 'ia-mind-note-badge' });
+    const noteBadge = controls.createSpan({ cls: 'ia-mind-note-badge' });
     setIcon(noteBadge, 'file-text');
     noteBadge.createSpan({ text: node.body ? 'Nota' : '+ Nota' });
     noteBadge.title = node.body ? 'Ver/editar subnota' : 'Adicionar subnota/caixa de texto';
 
     // Collapse toggle button
-    const collapseBtn = head.createEl('button', { cls: 'ia-mind-collapse-btn' });
+    const collapseBtn = controls.createEl('button', { cls: 'ia-mind-collapse-btn' });
     setIcon(collapseBtn, 'chevron-down');
 
     // Add child button
-    const addChildBtn = head.createEl('button', { cls: 'ia-mind-add-btn', attr: { title: 'Adicionar filho (Tab)' } });
+    const addChildBtn = controls.createEl('button', { cls: 'ia-mind-add-btn', attr: { title: 'Adicionar filho (Tab)' } });
     setIcon(addChildBtn, 'plus');
 
     // Subnote body container
@@ -827,7 +898,8 @@ export class EmbeddedMindMap {
       const titleSpan = head.querySelector('.ia-card-title');
       if (titleSpan) titleSpan.textContent = node.title || (node.relation ? 'Relação' : 'Novo tópico');
 
-      const noteBadge = head.querySelector('.ia-mind-note-badge');
+      const controls = head.querySelector('.romus-mind-node-controls');
+      const noteBadge = controls ? controls.querySelector('.ia-mind-note-badge') : head.querySelector('.ia-mind-note-badge');
       if (noteBadge) {
         noteBadge.classList.toggle('is-linked', Boolean(node.body));
         const badgeLabel = noteBadge.querySelector('span:last-child');
@@ -835,7 +907,7 @@ export class EmbeddedMindMap {
       }
 
       const hasChildren = this.data.nodes.some(n => n.parentId === node.id);
-      const collapseBtn = head.querySelector('.ia-mind-collapse-btn');
+      const collapseBtn = controls ? controls.querySelector('.ia-mind-collapse-btn') : head.querySelector('.ia-mind-collapse-btn');
       if (collapseBtn) {
         collapseBtn.style.display = hasChildren ? 'inline-flex' : 'none';
         setIcon(collapseBtn, node.collapsed ? 'chevron-right' : 'chevron-down');
@@ -1106,6 +1178,10 @@ export class EmbeddedMindMap {
 
   destroy() {
     this.inlineRename?.cancel();
+    if (this._fullscreenEscHandler) {
+      window.removeEventListener('keydown', this._fullscreenEscHandler, true);
+      this._fullscreenEscHandler = null;
+    }
     this.nodeElements.clear();
     this.container.empty?.();
   }
