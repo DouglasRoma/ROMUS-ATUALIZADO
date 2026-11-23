@@ -59,6 +59,7 @@ export function mindmapCodeBlock(owner){
      wrapper.className='romus-mindmap-block-wrapper';
      wrapper.contentEditable='false';
      let mindmap=null;
+     let isSelfDispatch=false;
      wrapper.onpointerdown=(e)=>{
       if(!e.target.closest('input, textarea')){
        mindmap?.container?.focus({preventScroll:true});
@@ -72,11 +73,17 @@ export function mindmapCodeBlock(owner){
        const currentNode=editor.state.doc.nodeAt(pos);
        if(currentNode&&currentNode.type.name==='codeBlock'){
         const content=newJson?editor.schema.text(newJson):[];
-        const tr=editor.state.tr.replaceWith(pos+1,pos+currentNode.nodeSize-1,content);
-        editor.view.dispatch(tr);
-        owner.dirty=true;
-        owner.owner.status.textContent='Salvando…';
-        owner.flushToOwner();
+        isSelfDispatch=true;
+        try{
+         const tr=editor.state.tr.replaceWith(pos+1,pos+currentNode.nodeSize-1,content);
+         tr.setMeta('addToHistory',false);
+         editor.view.dispatch(tr);
+         owner.dirty=true;
+         owner.owner.status.textContent='Salvando…';
+         owner.flushToOwner();
+        }finally{
+         isSelfDispatch=false;
+        }
        }
       }
      };
@@ -105,7 +112,7 @@ export function mindmapCodeBlock(owner){
       ignoreMutation:()=>true,
       update(next){
        if(next.type.name!=='codeBlock'||next.attrs.language!=='mindmap')return false;
-       if(mindmap&&next.textContent!==currentText){
+       if(!isSelfDispatch&&mindmap&&next.textContent!==currentText){
         currentText=next.textContent;
         mindmap.load(currentText);
        }

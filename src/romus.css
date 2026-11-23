@@ -613,6 +613,17 @@ kbd{font-family:var(--font-interface);border:1px solid var(--background-modifier
   width: auto;
   outline: none;
   box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45);
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.romus-mind-node.ia-card.ia-mind .ia-mind-rename::placeholder {
+  color: rgba(255, 255, 255, 0.45) !important;
+  font-style: italic;
+}
+
+.romus-mind-node.is-renaming {
+  z-index: 100 !important;
 }
 
 .romus-mind-node.ia-card.ia-mind .ia-mind-note-badge {

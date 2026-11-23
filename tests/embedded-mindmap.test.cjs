@@ -183,23 +183,32 @@ test('EmbeddedMindMap: calculateNodeSize guarantees room for full text and contr
 
 test('EmbeddedMindMap: sibling of root adds child of root seamlessly', async () => {
   const origDoc = global.document;
-  const makeEl = (tag) => ({
-    tagName: (tag || 'DIV').toUpperCase(),
-    dataset: {},
-    classList: { add() {}, remove() {}, toggle() {} },
-    style: { setProperty() {} },
-    createSpan: () => makeEl('span'),
-    createDiv: () => makeEl('div'),
-    createEl: (t) => makeEl(t),
-    appendChild: () => ({}),
-    setAttribute: () => {},
-    replaceChildren: () => {},
-    querySelector: () => makeEl('div'),
-    querySelectorAll: () => [],
-    getContext: () => ({
-      measureText: (t) => ({ width: (t || '').length * 8.5 })
-    })
-  });
+  const makeEl = (tag, o = {}) => {
+    const el = {
+      tagName: (tag || 'DIV').toUpperCase(),
+      dataset: {},
+      value: o.value !== undefined ? o.value : '',
+      placeholder: o.attr?.placeholder || '',
+      classList: { add() {}, remove() {}, toggle() {} },
+      style: { setProperty() {} },
+      createSpan: (opts) => makeEl('span', opts),
+      createDiv: (opts) => makeEl('div', opts),
+      createEl: (t, opts) => makeEl(t, opts),
+      appendChild: () => ({}),
+      setAttribute: (k, v) => { el[k] = v; },
+      replaceChildren: () => {},
+      remove: () => {},
+      focus: () => {},
+      select: () => {},
+      setSelectionRange: () => {},
+      querySelector: () => makeEl('div'),
+      querySelectorAll: () => [],
+      getContext: () => ({
+        measureText: (t) => ({ width: (t || '').length * 8.5 })
+      })
+    };
+    return el;
+  };
 
   global.document = {
     createElement: makeEl,
@@ -228,6 +237,144 @@ test('EmbeddedMindMap: sibling of root adds child of root seamlessly', async () 
     assert.ok(child, 'Deve criar o nó');
     assert.equal(child.parentId, '1', 'Deve ser filho da raiz');
     assert.equal(child.title, 'Novo tópico', 'Título inicial deve ser Novo tópico');
+    assert.ok(map.inlineRename, 'Deve ativar modo de renomeação imediatamente');
+    assert.equal(map.inlineRename.nodeId, child.id, 'Renomeação deve ser para o novo nó');
+    assert.equal(map.inlineRename.input.value, '', 'Valor inicial do input deve ser vazio para digitação direta');
+    assert.equal(map.inlineRename.input.placeholder, 'Novo tópico', 'Placeholder deve indicar Novo tópico');
+
+    // Simula usuário digitando "Patologia" e pressionando Enter / confirmando
+    map.inlineRename.input.value = 'Patologia';
+    map.inlineRename.finish();
+    assert.equal(child.title, 'Patologia', 'Título deve ser atualizado para Patologia');
+    assert.equal(map.inlineRename, null, 'Renomeação deve ser finalizada');
+  } finally {
+    global.document = origDoc;
+  }
+});
+
+test('EmbeddedMindMap: fluid navigation with Tab, Enter and direct typing', async () => {
+  const origDoc = global.document;
+  const makeEl = (tag, o = {}) => {
+    let _val = o.value !== undefined ? o.value : '';
+    const el = {
+      tagName: (tag || 'DIV').toUpperCase(),
+      dataset: {},
+      get value() { return _val; },
+      set value(v) { _val = v; },
+      placeholder: o.attr?.placeholder || '',
+      isConnected: true,
+      classList: { add() {}, remove() {}, toggle() {} },
+      style: { setProperty() {} },
+      createSpan: (opts) => makeEl('span', opts),
+      createDiv: (opts) => makeEl('div', opts),
+      createEl: (t, opts) => makeEl(t, opts),
+      appendChild: () => ({}),
+      setAttribute: (k, v) => { el[k] = v; },
+      replaceChildren: () => {},
+      remove: () => { el.isConnected = false; },
+      focus: () => {},
+      select: () => { el.selected = true; },
+      setSelectionRange: () => {},
+      querySelector: () => makeEl('div'),
+      querySelectorAll: () => [],
+      getContext: () => ({
+        measureText: (t) => ({ width: (t || '').length * 8.5 })
+      })
+    };
+    return el;
+  };
+
+  global.document = {
+    createElement: makeEl,
+    createElementNS: makeEl
+  };
+
+  const { EmbeddedMindMap } = await import('../src/embedded-mindmap.js');
+
+  const containerListeners = {};
+  const container = {
+    classList: { add() {}, remove() {}, toggle() {} },
+    style: {},
+    createDiv: () => makeEl('div'),
+    addEventListener: (evt, fn) => { containerListeners[evt] = fn; },
+    focus: () => {},
+    closest: () => null
+  };
+
+  try {
+    const map = new EmbeddedMindMap(container, {
+      data: JSON.stringify({
+        root: '1',
+        nodes: [{ id: '1', title: 'Cardiologia', color: '#38bdf8' }]
+      })
+    });
+
+    // 1. Direct character typing on selected node
+    map.selectNode('1');
+    containerListeners['keydown']({
+      key: 'M',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      target: container,
+      preventDefault() {},
+      stopPropagation() {}
+    });
+
+    assert.ok(map.inlineRename, 'Digitação direta em nó selecionado deve abrir renomeação imediatamente');
+    assert.equal(map.inlineRename.input.value, 'M', 'Primeiro caractere deve ser colocado no input');
+    map.inlineRename.finish();
+
+    // 2. Tab creates child and enters rename mode
+    map.selectNode('1');
+    containerListeners['keydown']({
+      key: 'Tab',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+      target: container,
+      preventDefault() {},
+      stopPropagation() {}
+    });
+
+    assert.ok(map.inlineRename, 'Tab deve criar nó filho e abrir renomeação imediatamente');
+    const childId = map.inlineRename.nodeId;
+    assert.notEqual(childId, '1', 'Deve ser o novo nó filho');
+    assert.equal(map.inlineRename.input.value, '', 'Input do novo nó deve estar limpo para digitação imediata');
+    assert.equal(map.inlineRename.input.placeholder, 'Novo tópico', 'Placeholder deve ser Novo tópico');
+
+    // Usuário digita "Insuficiência Cardíaca" e aperta Tab no próprio input para criar neto
+    map.inlineRename.input.value = 'Insuficiência Cardíaca';
+    const inputKeydown = map.inlineRename.input.onkeydown;
+    inputKeydown({
+      key: 'Tab',
+      stopPropagation() {},
+      preventDefault() {}
+    });
+
+    // O filho deve ter o título salvo e agora estamos renomeando o neto!
+    const childNode = map.data.nodes.find(n => n.id === childId);
+    assert.equal(childNode.title, 'Insuficiência Cardíaca', 'Título do filho deve ser salvo ao pressionar Tab');
+    assert.ok(map.inlineRename, 'Tab dentro do input deve criar e focar o próximo nó filho');
+    const grandsonId = map.inlineRename.nodeId;
+    const grandsonNode = map.data.nodes.find(n => n.id === grandsonId);
+    assert.equal(grandsonNode.parentId, childId, 'Neto deve ser filho de Insuficiência Cardíaca');
+
+    // Usuário digita "FEVE reduzida" e aperta Enter para criar irmão do neto
+    map.inlineRename.input.value = 'FEVE reduzida';
+    const grandsonKeydown = map.inlineRename.input.onkeydown;
+    grandsonKeydown({
+      key: 'Enter',
+      stopPropagation() {},
+      preventDefault() {}
+    });
+
+    assert.equal(grandsonNode.title, 'FEVE reduzida', 'Título do neto deve ser salvo ao pressionar Enter');
+    assert.ok(map.inlineRename, 'Enter deve criar e focar o nó irmão');
+    const siblingId = map.inlineRename.nodeId;
+    const siblingNode = map.data.nodes.find(n => n.id === siblingId);
+    assert.equal(siblingNode.parentId, childId, 'Irmão deve ter o mesmo pai');
+    assert.notEqual(siblingId, grandsonId, 'Deve ser um nó irmão distinto');
   } finally {
     global.document = origDoc;
   }

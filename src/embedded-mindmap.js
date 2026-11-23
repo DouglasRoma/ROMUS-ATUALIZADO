@@ -371,6 +371,7 @@ export class EmbeddedMindMap {
   }
 
   load(raw) {
+    if (this.inlineRename) return;
     this.data = parseMindmapData(raw);
     if (!this.data.nodes.some(n => n.id === this.selectedId)) {
       this.selectedId = this.data.root;
@@ -648,7 +649,7 @@ export class EmbeddedMindMap {
 
   initKeyboardShortcuts() {
     this.container.addEventListener('keydown', event => {
-      if (this.inlineRename || event.target.closest('input, textarea')) return;
+      if (this.inlineRename || event.target?.closest?.('input, textarea')) return;
 
       if (!this.selectedId) {
         this.selectedId = this.data.root || this.data.nodes[0]?.id;
@@ -673,6 +674,13 @@ export class EmbeddedMindMap {
         event.preventDefault();
         event.stopPropagation();
         this.renameNodeInline(selectedNode.id, false);
+      } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.renameNodeInline(selectedNode.id, true);
+        if (this.inlineRename && this.inlineRename.input) {
+          this.inlineRename.input.value = event.key;
+        }
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault();
         event.stopPropagation();
@@ -1027,11 +1035,14 @@ export class EmbeddedMindMap {
   }
 
   selectNode(id, focusContainer = true) {
+    if (this.inlineRename && this.inlineRename.nodeId !== id) {
+      this.inlineRename.finish();
+    }
     this.selectedId = id;
     for (const [nodeId, el] of this.nodeElements.entries()) {
       el.classList.toggle('is-selected', nodeId === id);
     }
-    if (focusContainer && this.container) {
+    if (focusContainer && this.container && !this.inlineRename) {
       this.container.focus({ preventScroll: true });
     }
   }
@@ -1082,14 +1093,9 @@ export class EmbeddedMindMap {
     this.data.nodes.push(newNode);
     this.selectedId = newId;
     this.layoutAndRender();
-    this.emitChange();
 
-    this.container.focus({ preventScroll: true });
-
-    // Open inline rename with text selected so the user can just type!
-    safeRAF(() => {
-      this.renameNodeInline(newId, true);
-    });
+    // Immediately open inline rename with input focused and ready to type
+    this.renameNodeInline(newId, true);
 
     return newNode;
   }
@@ -1110,12 +1116,12 @@ export class EmbeddedMindMap {
     label.style.display = 'none';
 
     const defaultPlaceholder = node.relation ? 'Relação' : 'Novo tópico';
-    const initialText = node.title || defaultPlaceholder;
+    const initialValue = isFresh ? '' : (node.title || defaultPlaceholder);
 
     const input = head.createEl('input', {
       cls: node.relation ? 'ia-mind-rename ia-relation-rename' : 'ia-mind-rename',
       type: 'text',
-      value: initialText,
+      value: initialValue,
       attr: {
         'aria-label': node.relation ? 'Rótulo da relação' : 'Título do nó',
         placeholder: defaultPlaceholder
@@ -1132,18 +1138,21 @@ export class EmbeddedMindMap {
 
       if (!cancel) {
         const val = input.value.trim();
-        const finalTitle = val || defaultPlaceholder;
-        if (finalTitle !== node.title) {
-          node.title = finalTitle;
-          label.textContent = finalTitle;
-          this.layoutAndRender();
-          this.emitChange();
-        }
+        const finalTitle = val || (isFresh ? defaultPlaceholder : (node.title || defaultPlaceholder));
+        node.title = finalTitle;
+        label.textContent = finalTitle;
+        this.layoutAndRender();
+        this.emitChange();
+      } else if (isFresh) {
+        node.title = defaultPlaceholder;
+        label.textContent = defaultPlaceholder;
+        this.layoutAndRender();
+        this.emitChange();
       }
       this.inlineRename = null;
     };
 
-    this.inlineRename = { finish: commit, cancel: () => commit(true) };
+    this.inlineRename = { nodeId, input, finish: commit, cancel: () => commit(true) };
 
     input.onpointerdown = e => e.stopPropagation();
     input.onclick = e => e.stopPropagation();
@@ -1182,11 +1191,19 @@ export class EmbeddedMindMap {
 
     const setFocus = () => {
       if (!input.isConnected) return;
-      input.focus();
-      input.select();
+      input.focus({ preventScroll: true });
+      if (!isFresh) {
+        input.select();
+        try {
+          input.setSelectionRange(0, input.value.length);
+        } catch (_) {}
+      }
     };
     setFocus();
-    setTimeout(setFocus, 25);
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(setFocus);
+    }
+    setTimeout(setFocus, 20);
   }
 
   editSubnote(nodeId) {
