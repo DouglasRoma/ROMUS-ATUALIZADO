@@ -364,6 +364,9 @@ export class EmbeddedMindMap {
     this.nodeElements = new Map();
     this.inlineRename = null;
     this.isFocused = false;
+    this._windowKeyHandler = null;
+    this._docClickListener = null;
+    this._docTimer = null;
     this._fullscreenEscHandler = null;
 
     this.initDOM();
@@ -396,7 +399,14 @@ export class EmbeddedMindMap {
   }
 
   setFocused(focused) {
-    this.isFocused = Boolean(focused);
+    const nextState = Boolean(focused);
+    if (this.isFocused === nextState) {
+      if (nextState && this.container) {
+        this.container.focus({ preventScroll: true });
+      }
+      return;
+    }
+    this.isFocused = nextState;
     this.container.classList.toggle('is-focused-mode', this.isFocused);
     if (this.focusBtn) {
       this.focusBtn.classList.toggle('is-active', this.isFocused);
@@ -413,6 +423,38 @@ export class EmbeddedMindMap {
         this.renderSelection();
       }
       this.container.focus({ preventScroll: true });
+
+      if (!this._windowKeyHandler && typeof window !== 'undefined') {
+        this._windowKeyHandler = (e) => this.handleWindowKeydown(e);
+        window.addEventListener?.('keydown', this._windowKeyHandler, true);
+      }
+      if (!this._docClickListener && typeof document !== 'undefined') {
+        this._docClickListener = (e) => {
+          if (!this.container || !this.isFocused) return;
+          if (this.container.contains(e.target)) return;
+          if (e.target?.closest?.('.romus-mindmap-subnote-modal, .modal, .menu, .notice')) return;
+          this.setFocused(false);
+        };
+        if (this._docTimer) clearTimeout(this._docTimer);
+        this._docTimer = setTimeout(() => {
+          if (this.isFocused && this._docClickListener && typeof document !== 'undefined') {
+            document.addEventListener?.('pointerdown', this._docClickListener);
+          }
+        }, 80);
+      }
+    } else {
+      if (this._docTimer) {
+        clearTimeout(this._docTimer);
+        this._docTimer = null;
+      }
+      if (this._windowKeyHandler && typeof window !== 'undefined') {
+        window.removeEventListener?.('keydown', this._windowKeyHandler, true);
+        this._windowKeyHandler = null;
+      }
+      if (this._docClickListener && typeof document !== 'undefined') {
+        document.removeEventListener?.('pointerdown', this._docClickListener);
+        this._docClickListener = null;
+      }
     }
   }
 
@@ -438,11 +480,22 @@ export class EmbeddedMindMap {
       }
     });
     focusBtn.tabIndex = -1;
-    focusBtn.onpointerdown = e => e.preventDefault();
+    focusBtn.onpointerdown = e => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    focusBtn.onmousedown = e => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
     const focusIconSpan = focusBtn.createSpan({ cls: 'romus-mindmap-focus-icon' });
     setIcon(focusIconSpan, 'crosshair');
     const focusLabel = this.focusLabel = focusBtn.createSpan({ text: 'Modo Foco' });
-    focusBtn.onclick = () => this.toggleFocusMode();
+    focusBtn.onclick = (e) => {
+      e?.preventDefault?.();
+      e?.stopPropagation?.();
+      this.toggleFocusMode();
+    };
 
     if (!this.readOnly) {
       const addChildBtn = leftTools.createEl('button', {
@@ -710,128 +763,191 @@ export class EmbeddedMindMap {
     };
 
     this.container.addEventListener('focus', () => this.setFocused(true));
-    this.container.addEventListener('focusout', (e) => {
-      if (!this.container.contains(e.relatedTarget)) {
-        this.setFocused(false);
-      }
-    });
   }
 
   initKeyboardShortcuts() {
     this.container.addEventListener('keydown', event => {
-      if (this.inlineRename || event.target?.closest?.('input, textarea')) return;
+      this.handleWindowKeydown(event);
+    }, true);
+  }
 
+  handleWindowKeydown(event) {
+    if (!this.isFocused) return;
+
+    // 1. If inline renaming input is open
+    if (this.inlineRename) {
       if (event.key === 'Tab') {
         event.preventDefault();
         event.stopPropagation();
-        this.setFocused(true);
-        if (!this.selectedId) {
-          this.selectedId = this.data.root || this.data.nodes[0]?.id;
-          this.renderSelection();
-        }
-        const targetNode = this.data.nodes.find(n => n.id === this.selectedId)
-          || this.data.nodes.find(n => n.id === this.data.root)
-          || this.data.nodes[0];
-        if (targetNode) {
-          this.addNode(targetNode.id, false);
-        }
+        event.stopImmediatePropagation?.();
+        const activeNodeId = this.inlineRename.nodeId;
+        this.inlineRename.finish();
+        this.addNode(activeNodeId, false);
         return;
       }
-
       if (event.key === 'Enter') {
         event.preventDefault();
         event.stopPropagation();
-        this.setFocused(true);
-        if (!this.selectedId) {
-          this.selectedId = this.data.root || this.data.nodes[0]?.id;
-          this.renderSelection();
-        }
-        const targetNode = this.data.nodes.find(n => n.id === this.selectedId)
-          || this.data.nodes.find(n => n.id === this.data.root)
-          || this.data.nodes[0];
-        if (targetNode) {
-          if (targetNode.parentId) {
-            this.addNode(targetNode.id, true);
-          } else {
-            this.addNode(targetNode.id, false);
-          }
+        event.stopImmediatePropagation?.();
+        const activeNodeId = this.inlineRename.nodeId;
+        const currentNode = this.data.nodes.find(n => n.id === activeNodeId);
+        this.inlineRename.finish();
+        if (currentNode && currentNode.parentId) {
+          this.addNode(currentNode.id, true);
+        } else if (currentNode) {
+          this.addNode(currentNode.id, false);
         }
         return;
       }
-
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        this.inlineRename.cancel();
+        this.container?.focus({ preventScroll: true });
+        return;
+      }
+      // While typing inside rename input: allow normal character input, but stop ProseMirror leak
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      return;
+    }
+
+    // 2. If focus is inside a textarea or code overlay, let it handle its own typing
+    if (event.target?.closest?.('.romus-mindmap-code-overlay, .romus-mindmap-subnote-modal, textarea')) {
+      return;
+    }
+
+    // 3. Tab: Add child node to selected
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      if (!this.selectedId) {
+        this.selectedId = this.data.root || this.data.nodes[0]?.id;
+        this.renderSelection();
+      }
+      const targetNode = this.data.nodes.find(n => n.id === this.selectedId)
+        || this.data.nodes.find(n => n.id === this.data.root)
+        || this.data.nodes[0];
+      if (targetNode) {
+        this.addNode(targetNode.id, false);
+      }
+      return;
+    }
+
+    // 4. Enter: Add sibling node (or child if root)
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      if (!this.selectedId) {
+        this.selectedId = this.data.root || this.data.nodes[0]?.id;
+        this.renderSelection();
+      }
+      const targetNode = this.data.nodes.find(n => n.id === this.selectedId)
+        || this.data.nodes.find(n => n.id === this.data.root)
+        || this.data.nodes[0];
+      if (targetNode) {
+        if (targetNode.parentId) {
+          this.addNode(targetNode.id, true);
+        } else {
+          this.addNode(targetNode.id, false);
+        }
+      }
+      return;
+    }
+
+    // 5. Escape: Exit focus mode or exit fullscreen
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      if (this.isFullscreen || this.container.classList.contains('is-fullscreen')) {
+        this.exitFullscreen();
+      } else {
         this.setFocused(false);
-        return;
       }
+      return;
+    }
 
-      if (event.key === 'F2' || event.key === ' ') {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!this.selectedId) {
-          this.selectedId = this.data.root || this.data.nodes[0]?.id;
-          this.renderSelection();
+    // 6. F2 or Space: Rename existing node keeping text
+    if (event.key === 'F2' || event.key === ' ') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      if (!this.selectedId) {
+        this.selectedId = this.data.root || this.data.nodes[0]?.id;
+        this.renderSelection();
+      }
+      const selectedNode = this.data.nodes.find(n => n.id === this.selectedId) || this.data.nodes[0];
+      if (selectedNode) this.renameNodeInline(selectedNode.id, false);
+      return;
+    }
+
+    // 7. Single Character: direct typing on selected node
+    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      if (!this.selectedId) {
+        this.selectedId = this.data.root || this.data.nodes[0]?.id;
+        this.renderSelection();
+      }
+      const selectedNode = this.data.nodes.find(n => n.id === this.selectedId) || this.data.nodes[0];
+      if (selectedNode) {
+        this.renameNodeInline(selectedNode.id, true);
+        if (this.inlineRename && this.inlineRename.input) {
+          this.inlineRename.input.value = event.key;
         }
-        const selectedNode = this.data.nodes.find(n => n.id === this.selectedId) || this.data.nodes[0];
-        if (selectedNode) this.renameNodeInline(selectedNode.id, false);
-        return;
       }
+      return;
+    }
 
-      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-        event.preventDefault();
-        event.stopPropagation();
-        if (!this.selectedId) {
-          this.selectedId = this.data.root || this.data.nodes[0]?.id;
-          this.renderSelection();
-        }
-        const selectedNode = this.data.nodes.find(n => n.id === this.selectedId) || this.data.nodes[0];
-        if (selectedNode) {
-          this.renameNodeInline(selectedNode.id, true);
-          if (this.inlineRename && this.inlineRename.input) {
-            this.inlineRename.input.value = event.key;
-          }
-        }
-        return;
+    // 8. Delete / Backspace: Delete selected node (unless root)
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      if (this.selectedId && this.selectedId !== this.data.root) {
+        this.deleteNode(this.selectedId);
       }
+      return;
+    }
 
-      if (event.key === 'Delete' || event.key === 'Backspace') {
-        event.preventDefault();
-        event.stopPropagation();
-        if (this.selectedId && this.selectedId !== this.data.root) {
-          this.deleteNode(this.selectedId);
-        }
-        return;
-      }
+    // 9. Arrow keys: Tree navigation
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      this.navigateTree(event.key);
+      return;
+    }
 
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.navigateTree(event.key);
-        return;
-      }
+    // 10. Zoom keys
+    if (event.key === '+' || event.key === '=') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      this.zoom(1.15);
+      return;
+    }
 
-      if (event.key === '+' || event.key === '=') {
-        event.preventDefault();
-        event.stopPropagation();
-        this.zoom(1.15);
-        return;
-      }
+    if (event.key === '-') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      this.zoom(0.85);
+      return;
+    }
 
-      if (event.key === '-') {
-        event.preventDefault();
-        event.stopPropagation();
-        this.zoom(0.85);
-        return;
-      }
-
-      if (event.key === '0') {
-        event.preventDefault();
-        event.stopPropagation();
-        this.centerView();
-        return;
-      }
-    }, true);
+    if (event.key === '0') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      this.centerView();
+      return;
+    }
   }
 
   navigateTree(direction) {
@@ -1179,8 +1295,11 @@ export class EmbeddedMindMap {
     for (const [nodeId, el] of this.nodeElements.entries()) {
       el.classList.toggle('is-selected', nodeId === id);
     }
-    if (focusContainer && this.container && !this.inlineRename) {
-      this.container.focus({ preventScroll: true });
+    if (focusContainer) {
+      this.setFocused(true);
+      if (this.container && !this.inlineRename) {
+        this.container.focus({ preventScroll: true });
+      }
     }
   }
 
@@ -1475,9 +1594,14 @@ export class EmbeddedMindMap {
   }
 
   destroy() {
+    if (this._docTimer) {
+      clearTimeout(this._docTimer);
+      this._docTimer = null;
+    }
+    this.setFocused(false);
     this.inlineRename?.cancel();
-    if (this._fullscreenEscHandler) {
-      window.removeEventListener('keydown', this._fullscreenEscHandler, true);
+    if (this._fullscreenEscHandler && typeof window !== 'undefined') {
+      window.removeEventListener?.('keydown', this._fullscreenEscHandler, true);
       this._fullscreenEscHandler = null;
     }
     this.nodeElements.clear();

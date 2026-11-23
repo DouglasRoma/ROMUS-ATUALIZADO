@@ -61,10 +61,19 @@ export function mindmapCodeBlock(owner){
      let mindmap=null;
      let isSelfDispatch=false;
      wrapper.onpointerdown=(e)=>{
-      mindmap?.setFocused(true);
-      if(!e.target.closest('input, textarea')){
+      e.stopPropagation();
+      if(!e.target?.closest?.('.romus-mindmap-focus-btn')){
+       mindmap?.setFocused(true);
+      }
+      if(!e.target?.closest?.('input, textarea, button')){
        mindmap?.container?.focus({preventScroll:true});
       }
+     };
+     wrapper.onmousedown=(e)=>{
+      e.stopPropagation();
+     };
+     wrapper.onclick=(e)=>{
+      e.stopPropagation();
      };
      let currentText=node.textContent;
      const updateNodeText=(newJson)=>{
@@ -278,6 +287,9 @@ export class FormattedEditor{
   items.forEach((item,index)=>{const button=menu.createEl('button',{attr:{role:'option','aria-selected':String(index===0)}});button.createEl('strong',{text:item.file?item.title:'Criar nota: '+item.title});if(item.file)button.createEl('small',{text:this.app.displayNoteFolder(item.file)||'Nota'});button.onpointerdown=event=>{event.preventDefault();this.choose(index)}});
  }
  onKey(event){
+  if(document?.querySelector?.('.romus-embedded-mindmap.is-focused-mode')||event.target?.closest?.('.romus-embedded-mindmap, .romus-mindmap-block-wrapper')){
+   return true;
+  }
   if(!this.menu)return false;
   if(event.key==='Escape'){this.closeSuggestions();return true}
   if(['ArrowDown','ArrowUp'].includes(event.key)){this.index=(this.index+(event.key==='ArrowDown'?1:-1)+this.items.length)%this.items.length;[...this.menu.children].forEach((el,i)=>el.setAttribute('aria-selected',String(i===this.index)));return true}
