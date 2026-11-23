@@ -180,3 +180,55 @@ test('EmbeddedMindMap: calculateNodeSize guarantees room for full text and contr
   assert.ok(size.w > 480, 'Nó com título longo deve ultrapassar 480px para não cortar texto');
   assert.ok(size.pillH >= 36, 'Altura da pílula deve acomodar a tipografia');
 });
+
+test('EmbeddedMindMap: sibling of root adds child of root seamlessly', async () => {
+  const origDoc = global.document;
+  const makeEl = (tag) => ({
+    tagName: (tag || 'DIV').toUpperCase(),
+    dataset: {},
+    classList: { add() {}, remove() {}, toggle() {} },
+    style: { setProperty() {} },
+    createSpan: () => makeEl('span'),
+    createDiv: () => makeEl('div'),
+    createEl: (t) => makeEl(t),
+    appendChild: () => ({}),
+    setAttribute: () => {},
+    replaceChildren: () => {},
+    querySelector: () => makeEl('div'),
+    querySelectorAll: () => [],
+    getContext: () => ({
+      measureText: (t) => ({ width: (t || '').length * 8.5 })
+    })
+  });
+
+  global.document = {
+    createElement: makeEl,
+    createElementNS: makeEl
+  };
+
+  const { EmbeddedMindMap } = await import('../src/embedded-mindmap.js');
+
+  const container = {
+    classList: { add() {}, remove() {}, toggle() {} },
+    style: {},
+    createDiv: () => makeEl('div'),
+    addEventListener: () => {},
+    focus: () => {}
+  };
+
+  try {
+    const map = new EmbeddedMindMap(container, {
+      data: JSON.stringify({
+        root: '1',
+        nodes: [{ id: '1', title: 'Raiz', color: '#38bdf8' }]
+      })
+    });
+
+    const child = map.addNode('1', true);
+    assert.ok(child, 'Deve criar o nó');
+    assert.equal(child.parentId, '1', 'Deve ser filho da raiz');
+    assert.equal(child.title, 'Novo tópico', 'Título inicial deve ser Novo tópico');
+  } finally {
+    global.document = origDoc;
+  }
+});

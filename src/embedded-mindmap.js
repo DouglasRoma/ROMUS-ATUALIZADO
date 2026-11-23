@@ -1,5 +1,9 @@
 import { setIcon, Modal, Menu, Notice } from './compat.js';
 
+const safeRAF = typeof requestAnimationFrame === 'function'
+  ? requestAnimationFrame
+  : (cb) => setTimeout(cb, 16);
+
 export const MINDMAP_COLORS = [
   '#38bdf8', // sky
   '#34d399', // emerald
@@ -363,7 +367,7 @@ export class EmbeddedMindMap {
 
     this.initDOM();
     this.layoutAndRender();
-    requestAnimationFrame(() => this.fitToView(true));
+    safeRAF(() => this.centerView());
   }
 
   load(raw) {
@@ -426,11 +430,17 @@ export class EmbeddedMindMap {
 
     const fitBtn = rightTools.createEl('button', {
       cls: 'romus-mindmap-btn',
-      attr: { title: 'Enquadrar mapa mental (100%)', 'aria-label': 'Enquadrar' }
+      attr: { title: 'Alternar entre 100% e enquadrar', 'aria-label': 'Enquadrar' }
     });
     setIcon(fitBtn, 'maximize-2');
-    fitBtn.createSpan({ text: '100%' });
-    fitBtn.onclick = () => this.fitToView();
+    const zoomDisplay = this.zoomDisplay = fitBtn.createSpan({ text: '100%' });
+    fitBtn.onclick = () => {
+      if (Math.abs(this.camera.z - 1.0) < 0.05) {
+        this.fitToView();
+      } else {
+        this.centerView();
+      }
+    };
 
     const zoomInBtn = rightTools.createEl('button', {
       cls: 'romus-mindmap-btn icon-only',
@@ -592,6 +602,7 @@ export class EmbeddedMindMap {
     const stage = this.stage;
 
     stage.onpointerdown = event => {
+      this.container.focus({ preventScroll: true });
       if (event.target.closest('.ia-card, .romus-mindmap-toolbar, .romus-mindmap-code-overlay, .romus-mindmap-resizer')) {
         return;
       }
@@ -639,32 +650,84 @@ export class EmbeddedMindMap {
     this.container.addEventListener('keydown', event => {
       if (this.inlineRename || event.target.closest('input, textarea')) return;
 
+      if (!this.selectedId) {
+        this.selectedId = this.data.root || this.data.nodes[0]?.id;
+        this.renderSelection();
+      }
+      const selectedNode = this.data.nodes.find(n => n.id === this.selectedId);
+      if (!selectedNode) return;
+
       if (event.key === 'Tab') {
         event.preventDefault();
         event.stopPropagation();
-        this.addNode(this.selectedId);
+        this.addNode(selectedNode.id, false);
       } else if (event.key === 'Enter') {
         event.preventDefault();
         event.stopPropagation();
-        this.addNode(this.selectedId, true);
-      } else if (event.key === 'F2') {
+        if (selectedNode.parentId) {
+          this.addNode(selectedNode.id, true);
+        } else {
+          this.addNode(selectedNode.id, false);
+        }
+      } else if (event.key === 'F2' || event.key === ' ') {
         event.preventDefault();
         event.stopPropagation();
-        if (this.selectedId) this.renameNodeInline(this.selectedId);
+        this.renameNodeInline(selectedNode.id, false);
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         event.preventDefault();
         event.stopPropagation();
-        if (this.selectedId && this.selectedId !== this.data.root) {
-          this.deleteNode(this.selectedId);
+        if (selectedNode.id !== this.data.root) {
+          this.deleteNode(selectedNode.id);
         }
+      } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.navigateTree(event.key);
       } else if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
         this.zoom(1.15);
       } else if (event.key === '-') {
+        event.preventDefault();
         this.zoom(0.85);
       } else if (event.key === '0') {
-        this.fitToView();
+        event.preventDefault();
+        this.centerView();
       }
     });
+  }
+
+  navigateTree(direction) {
+    if (!this.selectedId) {
+      this.selectNode(this.data.root || this.data.nodes[0]?.id);
+      return;
+    }
+    const current = this.data.nodes.find(n => n.id === this.selectedId);
+    if (!current) return;
+
+    if (direction === 'ArrowRight') {
+      const children = this.data.nodes.filter(n => n.parentId === current.id);
+      if (children.length > 0) {
+        current.collapsed = false;
+        this.layoutAndRender();
+        this.selectNode(children[0].id);
+      }
+    } else if (direction === 'ArrowLeft') {
+      if (current.parentId) {
+        this.selectNode(current.parentId);
+      }
+    } else if (direction === 'ArrowDown') {
+      const siblings = this.data.nodes.filter(n => n.parentId === current.parentId);
+      const idx = siblings.findIndex(n => n.id === current.id);
+      if (idx !== -1 && idx < siblings.length - 1) {
+        this.selectNode(siblings[idx + 1].id);
+      }
+    } else if (direction === 'ArrowUp') {
+      const siblings = this.data.nodes.filter(n => n.parentId === current.parentId);
+      const idx = siblings.findIndex(n => n.id === current.id);
+      if (idx > 0) {
+        this.selectNode(siblings[idx - 1].id);
+      }
+    }
   }
 
   zoom(factor, pivotX, pivotY) {
@@ -675,12 +738,37 @@ export class EmbeddedMindMap {
     const py = typeof pivotY === 'number' ? pivotY : h / 2;
 
     const oldZ = this.camera.z;
-    const newZ = Math.min(2.5, Math.max(0.25, oldZ * factor));
+    const newZ = Math.min(2.5, Math.max(0.25, Math.round(oldZ * factor * 100) / 100));
     if (newZ === oldZ) return;
 
     this.camera.x = px - (px - this.camera.x) * (newZ / oldZ);
     this.camera.y = py - (py - this.camera.y) * (newZ / oldZ);
     this.camera.z = newZ;
+    this.applyCamera();
+  }
+
+  centerView() {
+    if (!this.lastLayoutResult) return;
+    const stageW = this.stage.offsetWidth || this.container.offsetWidth || 600;
+    const stageH = this.stage.offsetHeight || this.container.offsetHeight || 400;
+
+    const rootPos = this.lastLayoutResult.positions.get(this.data.root);
+    if (rootPos) {
+      const rootCenterX = rootPos.x + rootPos.w / 2;
+      const rootCenterY = rootPos.y + rootPos.h / 2;
+      this.camera = {
+        x: Math.round(stageW * 0.28 - rootCenterX),
+        y: Math.round(stageH * 0.5 - rootCenterY),
+        z: 1.0
+      };
+    } else {
+      const { bbox } = this.lastLayoutResult;
+      this.camera = {
+        x: Math.round((stageW - bbox.width) / 2 - bbox.minX),
+        y: Math.round((stageH - bbox.height) / 2 - bbox.minY),
+        z: 1.0
+      };
+    }
     this.applyCamera();
   }
 
@@ -690,20 +778,33 @@ export class EmbeddedMindMap {
     const stageW = this.stage.offsetWidth || this.container.offsetWidth || 600;
     const stageH = this.stage.offsetHeight || this.container.offsetHeight || 400;
 
-    const pad = 42;
-    const scaleX = (stageW - pad * 2) / bbox.width;
-    const scaleY = (stageH - pad * 2) / bbox.height;
-    const z = Math.min(1.2, Math.max(0.35, Math.min(scaleX, scaleY)));
+    const pad = 48;
+    const availW = Math.max(100, stageW - pad * 2);
+    const availH = Math.max(100, stageH - pad * 2);
+    const scaleX = availW / Math.max(1, bbox.width);
+    const scaleY = availH / Math.max(1, bbox.height);
 
-    const x = (stageW - bbox.width * z) / 2 - (bbox.minX - 48) * z;
-    const y = (stageH - bbox.height * z) / 2 - (bbox.minY - 48) * z;
+    let z = 1.0;
+    if (bbox.width > availW || bbox.height > availH) {
+      z = Math.min(1.0, Math.max(0.35, Math.min(scaleX, scaleY)));
+      z = Math.round(z * 100) / 100;
+    }
 
-    this.camera = { x: Math.round(x), y: Math.round(y), z };
+    const x = Math.round((stageW - bbox.width * z) / 2 - (bbox.minX - 32) * z);
+    const y = Math.round((stageH - bbox.height * z) / 2 - (bbox.minY - 32) * z);
+
+    this.camera = { x, y, z };
     this.applyCamera();
   }
 
   applyCamera() {
-    this.world.style.transform = `translate(${this.camera.x}px, ${this.camera.y}px) scale(${this.camera.z})`;
+    const x = Math.round(this.camera.x);
+    const y = Math.round(this.camera.y);
+    const z = Math.round(this.camera.z * 1000) / 1000;
+    this.world.style.transform = `translate(${x}px, ${y}px) scale(${z})`;
+    if (this.zoomDisplay) {
+      this.zoomDisplay.textContent = `${Math.round(z * 100)}%`;
+    }
   }
 
   toggleFullscreen(forceState) {
@@ -840,36 +941,38 @@ export class EmbeddedMindMap {
     // Events
     el.onpointerdown = e => {
       e.stopPropagation();
-      this.selectNode(node.id);
+      this.selectNode(node.id, true);
     };
 
     el.ondblclick = e => {
       e.stopPropagation();
-      this.renameNodeInline(node.id);
+      e.preventDefault();
+      this.renameNodeInline(node.id, false);
     };
 
     el.oncontextmenu = e => {
       e.preventDefault();
       e.stopPropagation();
-      this.selectNode(node.id);
+      this.selectNode(node.id, true);
       this.showContextMenu(node.id, e);
     };
 
     noteBadge.onclick = e => {
       e.stopPropagation();
-      this.selectNode(node.id);
+      this.selectNode(node.id, true);
       this.editSubnote(node.id);
     };
 
     collapseBtn.onclick = e => {
       e.stopPropagation();
+      this.selectNode(node.id, true);
       this.toggleCollapse(node.id);
     };
 
     addChildBtn.onclick = e => {
       e.stopPropagation();
-      this.selectNode(node.id);
-      this.addNode(node.id);
+      this.selectNode(node.id, true);
+      this.addNode(node.id, false);
     };
 
     subnoteBox.ondblclick = e => {
@@ -923,10 +1026,13 @@ export class EmbeddedMindMap {
     }
   }
 
-  selectNode(id) {
+  selectNode(id, focusContainer = true) {
     this.selectedId = id;
     for (const [nodeId, el] of this.nodeElements.entries()) {
       el.classList.toggle('is-selected', nodeId === id);
+    }
+    if (focusContainer && this.container) {
+      this.container.focus({ preventScroll: true });
     }
   }
 
@@ -934,30 +1040,38 @@ export class EmbeddedMindMap {
     if (this.readOnly) return;
     this.inlineRename?.finish();
 
-    const parent = sibling
-      ? this.data.nodes.find(n => n.id === (this.data.nodes.find(m => m.id === parentId)?.parentId))
-      : this.data.nodes.find(n => n.id === parentId);
+    const current = this.data.nodes.find(n => n.id === parentId);
+    let parent = null;
 
-    if (!parent && sibling) {
-      new Notice('O tópico central não possui irmãos. Use + Filho.');
-      return;
+    if (sibling) {
+      if (current && current.parentId) {
+        parent = this.data.nodes.find(n => n.id === current.parentId);
+      } else {
+        // Root has no sibling; add child of root instead
+        parent = current || this.data.nodes.find(n => n.id === this.data.root);
+      }
+    } else {
+      parent = current || this.data.nodes.find(n => n.id === this.data.root);
     }
 
     const actualParent = parent || this.data.nodes.find(n => n.id === this.data.root) || this.data.nodes[0];
+    if (!actualParent) return;
+
     const newId = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
     let color;
     if (actualParent.id === this.data.root) {
       const childCount = this.data.nodes.filter(n => n.parentId === actualParent.id).length;
-      color = MINDMAP_COLORS[(childCount + 1) % MINDMAP_COLORS.length];
+      color = MINDMAP_COLORS[(childCount) % MINDMAP_COLORS.length];
     } else {
       color = actualParent.color || MINDMAP_COLORS[0];
     }
 
+    const defaultTitle = relation ? 'Relação' : 'Novo tópico';
     const newNode = {
       id: newId,
       parentId: actualParent.id,
-      title: relation ? 'Relação' : 'Novo tópico',
+      title: defaultTitle,
       color,
       body: '',
       collapsed: false,
@@ -970,14 +1084,17 @@ export class EmbeddedMindMap {
     this.layoutAndRender();
     this.emitChange();
 
-    setTimeout(() => {
+    this.container.focus({ preventScroll: true });
+
+    // Open inline rename with text selected so the user can just type!
+    safeRAF(() => {
       this.renameNodeInline(newId, true);
-    }, 25);
+    });
 
     return newNode;
   }
 
-  renameNodeInline(nodeId, isNew = false) {
+  renameNodeInline(nodeId, isFresh = false) {
     if (this.readOnly) return;
     this.inlineRename?.finish();
 
@@ -992,11 +1109,17 @@ export class EmbeddedMindMap {
     el.classList.add('is-renaming');
     label.style.display = 'none';
 
+    const defaultPlaceholder = node.relation ? 'Relação' : 'Novo tópico';
+    const initialText = node.title || defaultPlaceholder;
+
     const input = head.createEl('input', {
-      cls: 'ia-mind-rename',
+      cls: node.relation ? 'ia-mind-rename ia-relation-rename' : 'ia-mind-rename',
       type: 'text',
-      value: isNew ? '' : node.title,
-      attr: { placeholder: node.relation ? 'Relação' : 'Novo tópico' }
+      value: initialText,
+      attr: {
+        'aria-label': node.relation ? 'Rótulo da relação' : 'Título do nó',
+        placeholder: defaultPlaceholder
+      }
     });
 
     let finished = false;
@@ -1009,13 +1132,12 @@ export class EmbeddedMindMap {
 
       if (!cancel) {
         const val = input.value.trim();
-        if (val && val !== node.title) {
-          node.title = val;
+        const finalTitle = val || defaultPlaceholder;
+        if (finalTitle !== node.title) {
+          node.title = finalTitle;
+          label.textContent = finalTitle;
           this.layoutAndRender();
           this.emitChange();
-        } else if (isNew && !val) {
-          node.title = node.relation ? 'Relação' : 'Novo tópico';
-          this.layoutAndRender();
         }
       }
       this.inlineRename = null;
@@ -1029,23 +1151,42 @@ export class EmbeddedMindMap {
 
     input.onkeydown = e => {
       e.stopPropagation();
+      if (e.isComposing) return;
+
       if (e.key === 'Enter') {
         e.preventDefault();
         commit();
+        if (node.parentId) {
+          this.addNode(node.id, true);
+        } else {
+          this.addNode(node.id, false);
+        }
       } else if (e.key === 'Tab') {
         e.preventDefault();
         commit();
-        this.addNode(node.id);
+        this.addNode(node.id, false);
       } else if (e.key === 'Escape') {
+        e.preventDefault();
         commit(true);
+        this.container.focus({ preventScroll: true });
       }
     };
 
-    input.onblur = () => commit();
-    setTimeout(() => {
+    input.onblur = () => {
+      setTimeout(() => {
+        if (!finished && document.activeElement !== input) {
+          commit();
+        }
+      }, 50);
+    };
+
+    const setFocus = () => {
+      if (!input.isConnected) return;
       input.focus();
       input.select();
-    }, 20);
+    };
+    setFocus();
+    setTimeout(setFocus, 25);
   }
 
   editSubnote(nodeId) {

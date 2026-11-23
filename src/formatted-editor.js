@@ -58,6 +58,12 @@ export function mindmapCodeBlock(owner){
      const wrapper=document.createElement('div');
      wrapper.className='romus-mindmap-block-wrapper';
      wrapper.contentEditable='false';
+     let mindmap=null;
+     wrapper.onpointerdown=(e)=>{
+      if(!e.target.closest('input, textarea')){
+       mindmap?.container?.focus({preventScroll:true});
+      }
+     };
      let currentText=node.textContent;
      const updateNodeText=(newJson)=>{
       currentText=newJson;
@@ -87,7 +93,7 @@ export function mindmapCodeBlock(owner){
        }
       }
      };
-     const mindmap=new EmbeddedMindMap(wrapper,{
+     mindmap=new EmbeddedMindMap(wrapper,{
       data:currentText,
       app:owner.app,
       onChange:newJson=>updateNodeText(newJson),
