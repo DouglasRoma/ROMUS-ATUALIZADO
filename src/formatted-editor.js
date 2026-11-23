@@ -61,6 +61,7 @@ export function mindmapCodeBlock(owner){
      let mindmap=null;
      let isSelfDispatch=false;
      wrapper.onpointerdown=(e)=>{
+      mindmap?.setFocused(true);
       if(!e.target.closest('input, textarea')){
        mindmap?.container?.focus({preventScroll:true});
       }

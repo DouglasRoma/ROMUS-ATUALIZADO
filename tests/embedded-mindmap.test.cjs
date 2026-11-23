@@ -379,3 +379,93 @@ test('EmbeddedMindMap: fluid navigation with Tab, Enter and direct typing', asyn
     global.document = origDoc;
   }
 });
+
+test('EmbeddedMindMap: focus button and total isolation from Tab cycling', async () => {
+  const origDoc = global.document;
+  const createdButtons = [];
+  const makeEl = (tag, o = {}) => {
+    let _val = o.value !== undefined ? o.value : '';
+    const el = {
+      tagName: (tag || 'DIV').toUpperCase(),
+      dataset: {},
+      get value() { return _val; },
+      set value(v) { _val = v; },
+      placeholder: o.attr?.placeholder || '',
+      tabIndex: o.attr?.tabindex !== undefined ? parseInt(o.attr.tabindex, 10) : 0,
+      isConnected: true,
+      classList: { add() {}, remove() {}, toggle() {} },
+      style: { setProperty() {} },
+      createSpan: (opts) => makeEl('span', opts),
+      createDiv: (opts) => makeEl('div', opts),
+      createEl: (t, opts) => {
+        const child = makeEl(t, opts);
+        if (t === 'button') createdButtons.push(child);
+        return child;
+      },
+      appendChild: () => ({}),
+      setAttribute: (k, v) => {
+        el[k] = v;
+        if (k === 'tabindex') el.tabIndex = parseInt(v, 10);
+      },
+      replaceChildren: () => {},
+      remove: () => { el.isConnected = false; },
+      focus: () => {},
+      select: () => { el.selected = true; },
+      setSelectionRange: () => {},
+      querySelector: () => makeEl('div'),
+      querySelectorAll: () => [],
+      getContext: () => ({
+        measureText: (t) => ({ width: (t || '').length * 8.5 })
+      })
+    };
+    return el;
+  };
+
+  global.document = {
+    createElement: makeEl,
+    createElementNS: makeEl
+  };
+
+  const { EmbeddedMindMap } = await import('../src/embedded-mindmap.js');
+
+  const containerListeners = {};
+  const container = {
+    classList: { add() {}, remove() {}, toggle() {} },
+    style: {},
+    createDiv: () => makeEl('div'),
+    addEventListener: (evt, fn) => { containerListeners[evt] = fn; },
+    focus: () => {},
+    closest: () => null
+  };
+
+  try {
+    const map = new EmbeddedMindMap(container, {
+      data: JSON.stringify({
+        root: '1',
+        nodes: [
+          { id: '1', title: 'Cardiologia', color: '#38bdf8' },
+          { id: '2', parentId: '1', title: 'Subtópico 1', color: '#34d399' }
+        ]
+      })
+    });
+
+    // Verify focus button exists and toggles focus
+    assert.ok(map.focusBtn, 'Botão de modo foco deve existir na barra de ferramentas');
+    assert.equal(map.focusBtn.tabIndex, -1, 'Botão de foco não deve ser tabulável');
+    assert.equal(map.isFocused, false);
+
+    map.toggleFocusMode();
+    assert.equal(map.isFocused, true, 'Deve ativar o modo de foco independente');
+
+    map.toggleFocusMode();
+    assert.equal(map.isFocused, false, 'Deve desativar o modo de foco');
+
+    // Verify every button in the mind map has tabIndex === -1
+    assert.ok(createdButtons.length > 5, 'Deve haver múltiplos botões criados');
+    for (const btn of createdButtons) {
+      assert.equal(btn.tabIndex, -1, `Botão ${btn.tagName} deve ter tabIndex -1 para impedir navegação por Tab`);
+    }
+  } finally {
+    global.document = origDoc;
+  }
+});

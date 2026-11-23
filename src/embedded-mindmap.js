@@ -363,6 +363,7 @@ export class EmbeddedMindMap {
     this.panState = null;
     this.nodeElements = new Map();
     this.inlineRename = null;
+    this.isFocused = false;
     this._fullscreenEscHandler = null;
 
     this.initDOM();
@@ -390,6 +391,31 @@ export class EmbeddedMindMap {
     }
   }
 
+  toggleFocusMode() {
+    this.setFocused(!this.isFocused);
+  }
+
+  setFocused(focused) {
+    this.isFocused = Boolean(focused);
+    this.container.classList.toggle('is-focused-mode', this.isFocused);
+    if (this.focusBtn) {
+      this.focusBtn.classList.toggle('is-active', this.isFocused);
+      if (this.focusLabel) {
+        this.focusLabel.textContent = this.isFocused ? 'Foco Ativo' : 'Modo Foco';
+      }
+      this.focusBtn.title = this.isFocused
+        ? 'Modo Foco Ativo (Tab = Filho, Enter = Irmão, digite direto). Clique para desativar.'
+        : 'Ativar Modo Foco (Tab cria filhos sem interferência do markdown)';
+    }
+    if (this.isFocused) {
+      if (!this.selectedId) {
+        this.selectedId = this.data.root || this.data.nodes[0]?.id;
+        this.renderSelection();
+      }
+      this.container.focus({ preventScroll: true });
+    }
+  }
+
   initDOM() {
     this.container.classList.add('romus-embedded-mindmap');
     this.container.style.height = `${this.data.height || 400}px`;
@@ -402,19 +428,39 @@ export class EmbeddedMindMap {
     setIcon(titlePill.createSpan({ cls: 'romus-mindmap-badge-icon' }), 'git-fork');
     titlePill.createSpan({ text: 'Mapa mental' });
 
+    // Focus Mode Toggle Button (requested by user: "coloque algum botao de foco de mapa mental no propio makdonw")
+    const focusBtn = this.focusBtn = leftTools.createEl('button', {
+      cls: 'romus-mindmap-btn romus-mindmap-focus-btn',
+      attr: {
+        tabindex: '-1',
+        title: 'Ativar Modo Foco Independente (Tab cria filhos sem interferência do markdown)',
+        'aria-label': 'Modo foco'
+      }
+    });
+    focusBtn.tabIndex = -1;
+    focusBtn.onpointerdown = e => e.preventDefault();
+    const focusIconSpan = focusBtn.createSpan({ cls: 'romus-mindmap-focus-icon' });
+    setIcon(focusIconSpan, 'crosshair');
+    const focusLabel = this.focusLabel = focusBtn.createSpan({ text: 'Modo Foco' });
+    focusBtn.onclick = () => this.toggleFocusMode();
+
     if (!this.readOnly) {
       const addChildBtn = leftTools.createEl('button', {
         cls: 'romus-mindmap-btn',
-        attr: { title: 'Adicionar filho ao nó selecionado (Tab)', 'aria-label': 'Adicionar filho' }
+        attr: { tabindex: '-1', title: 'Adicionar filho ao nó selecionado (Tab)', 'aria-label': 'Adicionar filho' }
       });
+      addChildBtn.tabIndex = -1;
+      addChildBtn.onpointerdown = e => e.preventDefault();
       setIcon(addChildBtn, 'plus');
       addChildBtn.createSpan({ text: 'Filho' });
       addChildBtn.onclick = () => this.addNode(this.selectedId);
 
       const addSiblingBtn = leftTools.createEl('button', {
         cls: 'romus-mindmap-btn',
-        attr: { title: 'Adicionar irmão ao nó selecionado (Enter)', 'aria-label': 'Adicionar irmão' }
+        attr: { tabindex: '-1', title: 'Adicionar irmão ao nó selecionado (Enter)', 'aria-label': 'Adicionar irmão' }
       });
+      addSiblingBtn.tabIndex = -1;
+      addSiblingBtn.onpointerdown = e => e.preventDefault();
       setIcon(addSiblingBtn, 'git-commit');
       addSiblingBtn.createSpan({ text: 'Irmão' });
       addSiblingBtn.onclick = () => this.addNode(this.selectedId, true);
@@ -424,15 +470,19 @@ export class EmbeddedMindMap {
 
     const zoomOutBtn = rightTools.createEl('button', {
       cls: 'romus-mindmap-btn icon-only',
-      attr: { title: 'Diminuir zoom (-)', 'aria-label': 'Zoom -' }
+      attr: { tabindex: '-1', title: 'Diminuir zoom (-)', 'aria-label': 'Zoom -' }
     });
+    zoomOutBtn.tabIndex = -1;
+    zoomOutBtn.onpointerdown = e => e.preventDefault();
     setIcon(zoomOutBtn, 'minus');
     zoomOutBtn.onclick = () => this.zoom(0.85);
 
     const fitBtn = rightTools.createEl('button', {
       cls: 'romus-mindmap-btn',
-      attr: { title: 'Alternar entre 100% e enquadrar', 'aria-label': 'Enquadrar' }
+      attr: { tabindex: '-1', title: 'Alternar entre 100% e enquadrar', 'aria-label': 'Enquadrar' }
     });
+    fitBtn.tabIndex = -1;
+    fitBtn.onpointerdown = e => e.preventDefault();
     setIcon(fitBtn, 'maximize-2');
     const zoomDisplay = this.zoomDisplay = fitBtn.createSpan({ text: '100%' });
     fitBtn.onclick = () => {
@@ -445,24 +495,30 @@ export class EmbeddedMindMap {
 
     const zoomInBtn = rightTools.createEl('button', {
       cls: 'romus-mindmap-btn icon-only',
-      attr: { title: 'Aumentar zoom (+)', 'aria-label': 'Zoom +' }
+      attr: { tabindex: '-1', title: 'Aumentar zoom (+)', 'aria-label': 'Zoom +' }
     });
+    zoomInBtn.tabIndex = -1;
+    zoomInBtn.onpointerdown = e => e.preventDefault();
     setIcon(zoomInBtn, 'plus');
     zoomInBtn.onclick = () => this.zoom(1.18);
 
     // Fullscreen Toggle Button
     const fullscreenBtn = this.fullscreenBtn = rightTools.createEl('button', {
       cls: 'romus-mindmap-btn icon-only',
-      attr: { title: 'Expandir / Tela cheia', 'aria-label': 'Tela cheia' }
+      attr: { tabindex: '-1', title: 'Expandir / Tela cheia', 'aria-label': 'Tela cheia' }
     });
+    fullscreenBtn.tabIndex = -1;
+    fullscreenBtn.onpointerdown = e => e.preventDefault();
     setIcon(fullscreenBtn, 'expand');
     fullscreenBtn.onclick = () => this.toggleFullscreen();
 
     // Close Fullscreen Button (prominent in fullscreen)
     const closeFullscreenBtn = this.closeFullscreenBtn = rightTools.createEl('button', {
       cls: 'romus-mindmap-btn romus-mindmap-close-fullscreen-btn',
-      attr: { title: 'Sair da tela cheia (Esc)', 'aria-label': 'Sair da tela cheia' }
+      attr: { tabindex: '-1', title: 'Sair da tela cheia (Esc)', 'aria-label': 'Sair da tela cheia' }
     });
+    closeFullscreenBtn.tabIndex = -1;
+    closeFullscreenBtn.onpointerdown = e => e.preventDefault();
     setIcon(closeFullscreenBtn, 'x');
     closeFullscreenBtn.createSpan({ text: 'Sair da tela cheia (Esc)' });
     closeFullscreenBtn.style.display = 'none';
@@ -470,8 +526,10 @@ export class EmbeddedMindMap {
 
     const codeBtn = rightTools.createEl('button', {
       cls: 'romus-mindmap-btn icon-only',
-      attr: { title: 'Ver ou editar código JSON', 'aria-label': 'Código' }
+      attr: { tabindex: '-1', title: 'Ver ou editar código JSON', 'aria-label': 'Código' }
     });
+    codeBtn.tabIndex = -1;
+    codeBtn.onpointerdown = e => e.preventDefault();
     setIcon(codeBtn, 'code');
     codeBtn.onclick = () => this.toggleCodeOverlay();
 
@@ -479,8 +537,10 @@ export class EmbeddedMindMap {
     if (!this.readOnly && typeof this.options.onRemove === 'function') {
       const deleteMapBtn = rightTools.createEl('button', {
         cls: 'romus-mindmap-btn romus-mindmap-delete-btn icon-only',
-        attr: { title: 'Remover mapa mental da nota', 'aria-label': 'Remover mapa mental' }
+        attr: { tabindex: '-1', title: 'Remover mapa mental da nota', 'aria-label': 'Remover mapa mental' }
       });
+      deleteMapBtn.tabIndex = -1;
+      deleteMapBtn.onpointerdown = e => e.preventDefault();
       setIcon(deleteMapBtn, 'trash-2');
       deleteMapBtn.onclick = () => {
         if (confirm('Deseja realmente remover este mapa mental da nota?')) {
@@ -524,8 +584,10 @@ export class EmbeddedMindMap {
     header.createSpan({ text: 'Editor de Código do Mapa Mental (JSON)' });
 
     const btnWrap = header.createDiv({ style: 'display:flex;gap:6px;' });
-    const applyBtn = btnWrap.createEl('button', { cls: 'mod-cta', text: 'Aplicar alterações' });
-    const closeBtn = btnWrap.createEl('button', { text: 'Fechar' });
+    const applyBtn = btnWrap.createEl('button', { cls: 'mod-cta', text: 'Aplicar alterações', attr: { tabindex: '-1' } });
+    applyBtn.tabIndex = -1;
+    const closeBtn = btnWrap.createEl('button', { text: 'Fechar', attr: { tabindex: '-1' } });
+    closeBtn.tabIndex = -1;
 
     const textarea = this.codeTextarea = overlay.createEl('textarea', {
       cls: 'romus-mindmap-code-textarea',
@@ -603,6 +665,7 @@ export class EmbeddedMindMap {
     const stage = this.stage;
 
     stage.onpointerdown = event => {
+      this.setFocused(true);
       this.container.focus({ preventScroll: true });
       if (event.target.closest('.ia-card, .romus-mindmap-toolbar, .romus-mindmap-code-overlay, .romus-mindmap-resizer')) {
         return;
@@ -645,63 +708,130 @@ export class EmbeddedMindMap {
       const factor = event.deltaY < 0 ? 1.12 : 0.89;
       this.zoom(factor, clientX, clientY);
     };
+
+    this.container.addEventListener('focus', () => this.setFocused(true));
+    this.container.addEventListener('focusout', (e) => {
+      if (!this.container.contains(e.relatedTarget)) {
+        this.setFocused(false);
+      }
+    });
   }
 
   initKeyboardShortcuts() {
     this.container.addEventListener('keydown', event => {
       if (this.inlineRename || event.target?.closest?.('input, textarea')) return;
 
-      if (!this.selectedId) {
-        this.selectedId = this.data.root || this.data.nodes[0]?.id;
-        this.renderSelection();
-      }
-      const selectedNode = this.data.nodes.find(n => n.id === this.selectedId);
-      if (!selectedNode) return;
-
       if (event.key === 'Tab') {
         event.preventDefault();
         event.stopPropagation();
-        this.addNode(selectedNode.id, false);
-      } else if (event.key === 'Enter') {
-        event.preventDefault();
-        event.stopPropagation();
-        if (selectedNode.parentId) {
-          this.addNode(selectedNode.id, true);
-        } else {
-          this.addNode(selectedNode.id, false);
+        this.setFocused(true);
+        if (!this.selectedId) {
+          this.selectedId = this.data.root || this.data.nodes[0]?.id;
+          this.renderSelection();
         }
-      } else if (event.key === 'F2' || event.key === ' ') {
-        event.preventDefault();
-        event.stopPropagation();
-        this.renameNodeInline(selectedNode.id, false);
-      } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.renameNodeInline(selectedNode.id, true);
-        if (this.inlineRename && this.inlineRename.input) {
-          this.inlineRename.input.value = event.key;
+        const targetNode = this.data.nodes.find(n => n.id === this.selectedId)
+          || this.data.nodes.find(n => n.id === this.data.root)
+          || this.data.nodes[0];
+        if (targetNode) {
+          this.addNode(targetNode.id, false);
         }
-      } else if (event.key === 'Delete' || event.key === 'Backspace') {
+        return;
+      }
+
+      if (event.key === 'Enter') {
         event.preventDefault();
         event.stopPropagation();
-        if (selectedNode.id !== this.data.root) {
-          this.deleteNode(selectedNode.id);
+        this.setFocused(true);
+        if (!this.selectedId) {
+          this.selectedId = this.data.root || this.data.nodes[0]?.id;
+          this.renderSelection();
         }
-      } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+        const targetNode = this.data.nodes.find(n => n.id === this.selectedId)
+          || this.data.nodes.find(n => n.id === this.data.root)
+          || this.data.nodes[0];
+        if (targetNode) {
+          if (targetNode.parentId) {
+            this.addNode(targetNode.id, true);
+          } else {
+            this.addNode(targetNode.id, false);
+          }
+        }
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.setFocused(false);
+        return;
+      }
+
+      if (event.key === 'F2' || event.key === ' ') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!this.selectedId) {
+          this.selectedId = this.data.root || this.data.nodes[0]?.id;
+          this.renderSelection();
+        }
+        const selectedNode = this.data.nodes.find(n => n.id === this.selectedId) || this.data.nodes[0];
+        if (selectedNode) this.renameNodeInline(selectedNode.id, false);
+        return;
+      }
+
+      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!this.selectedId) {
+          this.selectedId = this.data.root || this.data.nodes[0]?.id;
+          this.renderSelection();
+        }
+        const selectedNode = this.data.nodes.find(n => n.id === this.selectedId) || this.data.nodes[0];
+        if (selectedNode) {
+          this.renameNodeInline(selectedNode.id, true);
+          if (this.inlineRename && this.inlineRename.input) {
+            this.inlineRename.input.value = event.key;
+          }
+        }
+        return;
+      }
+
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        event.stopPropagation();
+        if (this.selectedId && this.selectedId !== this.data.root) {
+          this.deleteNode(this.selectedId);
+        }
+        return;
+      }
+
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
         event.preventDefault();
         event.stopPropagation();
         this.navigateTree(event.key);
-      } else if (event.key === '+' || event.key === '=') {
-        event.preventDefault();
-        this.zoom(1.15);
-      } else if (event.key === '-') {
-        event.preventDefault();
-        this.zoom(0.85);
-      } else if (event.key === '0') {
-        event.preventDefault();
-        this.centerView();
+        return;
       }
-    });
+
+      if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.zoom(1.15);
+        return;
+      }
+
+      if (event.key === '-') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.zoom(0.85);
+        return;
+      }
+
+      if (event.key === '0') {
+        event.preventDefault();
+        event.stopPropagation();
+        this.centerView();
+        return;
+      }
+    }, true);
   }
 
   navigateTree(direction) {
@@ -929,17 +1059,23 @@ export class EmbeddedMindMap {
     const controls = head.createDiv({ cls: 'romus-mind-node-controls' });
 
     // Subnote (+ Nota) button
-    const noteBadge = controls.createSpan({ cls: 'ia-mind-note-badge' });
+    const noteBadge = controls.createSpan({ cls: 'ia-mind-note-badge', attr: { tabindex: '-1' } });
+    noteBadge.tabIndex = -1;
+    noteBadge.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); };
     setIcon(noteBadge, 'file-text');
     noteBadge.createSpan({ text: node.body ? 'Nota' : '+ Nota' });
     noteBadge.title = node.body ? 'Ver/editar subnota' : 'Adicionar subnota/caixa de texto';
 
     // Collapse toggle button
-    const collapseBtn = controls.createEl('button', { cls: 'ia-mind-collapse-btn' });
+    const collapseBtn = controls.createEl('button', { cls: 'ia-mind-collapse-btn', attr: { tabindex: '-1' } });
+    collapseBtn.tabIndex = -1;
+    collapseBtn.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); };
     setIcon(collapseBtn, 'chevron-down');
 
     // Add child button
-    const addChildBtn = controls.createEl('button', { cls: 'ia-mind-add-btn', attr: { title: 'Adicionar filho (Tab)' } });
+    const addChildBtn = controls.createEl('button', { cls: 'ia-mind-add-btn', attr: { tabindex: '-1', title: 'Adicionar filho (Tab)' } });
+    addChildBtn.tabIndex = -1;
+    addChildBtn.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); };
     setIcon(addChildBtn, 'plus');
 
     // Subnote body container
@@ -949,6 +1085,7 @@ export class EmbeddedMindMap {
     // Events
     el.onpointerdown = e => {
       e.stopPropagation();
+      this.setFocused(true);
       this.selectNode(node.id, true);
     };
 
@@ -1164,6 +1301,7 @@ export class EmbeddedMindMap {
 
       if (e.key === 'Enter') {
         e.preventDefault();
+        e.stopPropagation();
         commit();
         if (node.parentId) {
           this.addNode(node.id, true);
@@ -1172,10 +1310,12 @@ export class EmbeddedMindMap {
         }
       } else if (e.key === 'Tab') {
         e.preventDefault();
+        e.stopPropagation();
         commit();
         this.addNode(node.id, false);
       } else if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopPropagation();
         commit(true);
         this.container.focus({ preventScroll: true });
       }

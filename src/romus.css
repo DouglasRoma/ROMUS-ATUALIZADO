@@ -426,6 +426,54 @@ kbd{font-family:var(--font-interface);border:1px solid var(--background-modifier
   height: 14px;
 }
 
+.romus-embedded-mindmap.is-focused-mode {
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45), 0 8px 32px rgba(0, 0, 0, 0.45) !important;
+}
+
+.romus-embedded-mindmap button,
+.romus-embedded-mindmap .romus-mindmap-btn,
+.romus-embedded-mindmap .ia-mind-collapse-btn,
+.romus-embedded-mindmap .ia-mind-add-btn,
+.romus-embedded-mindmap .ia-mind-note-badge {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+.romus-embedded-mindmap button:focus,
+.romus-embedded-mindmap button:focus-visible,
+.romus-embedded-mindmap .romus-mindmap-btn:focus,
+.romus-embedded-mindmap .romus-mindmap-btn:focus-visible,
+.romus-embedded-mindmap .ia-mind-collapse-btn:focus,
+.romus-embedded-mindmap .ia-mind-collapse-btn:focus-visible,
+.romus-embedded-mindmap .ia-mind-add-btn:focus,
+.romus-embedded-mindmap .ia-mind-add-btn:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.romus-mindmap-focus-btn {
+  border: 1px solid rgba(56, 189, 248, 0.35) !important;
+  background: rgba(56, 189, 248, 0.08) !important;
+  color: #38bdf8 !important;
+  font-weight: 600 !important;
+  gap: 5px !important;
+  padding: 4px 9px !important;
+}
+
+.romus-mindmap-focus-btn:hover {
+  background: rgba(56, 189, 248, 0.18) !important;
+  border-color: #38bdf8 !important;
+  color: #ffffff !important;
+}
+
+.romus-mindmap-focus-btn.is-active {
+  background: #0284c7 !important;
+  border-color: #38bdf8 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.45) !important;
+}
+
 .romus-mindmap-btn {
   background: transparent;
   border: 1px solid transparent;
@@ -438,6 +486,7 @@ kbd{font-family:var(--font-interface);border:1px solid var(--background-modifier
   align-items: center;
   gap: 5px;
   cursor: pointer;
+  outline: none !important;
   transition: all 0.15s ease;
 }
 
