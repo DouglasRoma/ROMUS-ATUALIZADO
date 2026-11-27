@@ -2005,24 +2005,25 @@ function parseBoard(raw) {
     }
     for (const p of n.pins || []) if (p.mapRoot && (byId.get(p.mapRoot)?.type !== 'mind' || byId.get(p.mapRoot)?.mapId !== p.mapRoot)) throw new Error('Mapa do alfinete inexistente.');
   }
-  for (const e of b.edges) {
-    if (e?.label !== undefined && (typeof e.label !== 'string' || e.label.length > 500)) throw new Error('Rótulo de linha inválido.');
-    if (!e || typeof e.id !== 'string' || !e.from || !e.to || !ids.has(e.from.node) || !ids.has(e.to.node)) throw new Error('Ligação inválida no quadro.');
-    for (const endpoint of [e.from, e.to]) if (endpoint.pin && !pinIds.get(endpoint.node)?.has(endpoint.pin)) throw new Error('Ligação com alfinete inexistente.');
-  }
-  if (!b.camera || ![b.camera.x, b.camera.y, b.camera.z].every(finite)) b.camera = { x: 80, y: 70, z: 1 };
-  b.camera.z = Math.min(3, Math.max(.15, b.camera.z));
-  b.drawings = Array.isArray(b.drawings) ? b.drawings : [];
-  b.grid = typeof b.grid === 'string' ? b.grid : 'dots';
+  const groupIds = new Set();
   if (b.groups !== undefined) {
     if (!Array.isArray(b.groups)) throw new Error('Grupos inválidos.');
-    const groupIds = new Set();
     for (const g of b.groups) {
       if (!g || typeof g.id !== 'string' || groupIds.has(g.id) || typeof g.title !== 'string' || !/^#[0-9a-f]{6}$/i.test(g.color) || !Array.isArray(g.members) || !g.members.every(id => typeof id === 'string') || ![g.x, g.y].every(finite)) throw new Error('Grupo inválido.');
       groupIds.add(g.id); g.members = [...new Set(g.members.filter(id => ids.has(id)))];
       if (g.excluded !== undefined && (!Array.isArray(g.excluded) || !g.excluded.every(id => typeof id === 'string'))) throw new Error('Exclusões do grupo inválidas.');
     }
   }
+  const validEndpoint = ep => ep && typeof ep === 'object' && ((typeof ep.node === 'string' && ids.has(ep.node)) || (typeof ep.group === 'string' && groupIds.has(ep.group)));
+  for (const e of b.edges) {
+    if (e?.label !== undefined && (typeof e.label !== 'string' || e.label.length > 500)) throw new Error('Rótulo de linha inválido.');
+    if (!e || typeof e.id !== 'string' || !validEndpoint(e.from) || !validEndpoint(e.to)) throw new Error('Ligação inválida no quadro.');
+    for (const endpoint of [e.from, e.to]) if (endpoint.pin && (!endpoint.node || !pinIds.get(endpoint.node)?.has(endpoint.pin))) throw new Error('Ligação com alfinete inexistente.');
+  }
+  if (!b.camera || ![b.camera.x, b.camera.y, b.camera.z].every(finite)) b.camera = { x: 80, y: 70, z: 1 };
+  b.camera.z = Math.min(3, Math.max(.15, b.camera.z));
+  b.drawings = Array.isArray(b.drawings) ? b.drawings : [];
+  b.grid = typeof b.grid === 'string' ? b.grid : 'dots';
   return b;
 }
 
@@ -2062,7 +2063,7 @@ function visualContentHash(bundle) {
 function atlasSceneIndex(board) {
   const byId = new Map(), maps = new Map(), order = new Map(), outgoing = new Map();
   board.nodes.forEach((node, i) => { byId.set(node.id, node); order.set(node.id, i); if (node.type === 'mind') { if (!maps.has(node.mapId)) maps.set(node.mapId, []); maps.get(node.mapId).push(node); } });
-  for (const edge of board.edges) { if (!outgoing.has(edge.from.node)) outgoing.set(edge.from.node, []); outgoing.get(edge.from.node).push(edge); }
+  for (const edge of board.edges) { if (!edge.from?.node) continue; if (!outgoing.has(edge.from.node)) outgoing.set(edge.from.node, []); outgoing.get(edge.from.node).push(edge); }
   return { byId, maps, order, outgoing };
 }
 function visualInputHash(board, root, index) {
@@ -3998,7 +3999,7 @@ class AtlasView extends TextFileView {
     if (this.viewport?.isConnected && this.contentEl.contains(this.viewport)) {
       if (this.backBoardButton) this.backBoardButton.disabled = !this.plugin.whiteboardHistory?.get(this.leaf.id)?.length;
       this.viewport.className = `ia-viewport mode-${this.mode}`;
-      if (this.hint) this.hint.textContent = this.mode === 'draw' ? 'Arraste para desenhar livremente no quadro · Esc volta para mover.' : this.mode === 'area' ? 'Arraste sobre a imagem para marcar uma área · Escape cancela.' : this.mode === 'pin' ? 'Clique na imagem para colocar um alfinete.' : this.mode === 'connect' ? 'Clique na origem e depois no destino.' : 'Arraste os cartões pelo título · Arraste o fundo para mover · Use a roda para ampliar';
+      if (this.hint) this.hint.textContent = this.mode === 'draw' ? 'Arraste para desenhar livremente no quadro · Esc volta para mover.' : this.mode === 'area' ? 'Arraste sobre a imagem para marcar uma área · Escape cancela.' : this.mode === 'pin' ? 'Clique na imagem para colocar um alfinete.' : this.mode === 'connect' ? 'Clique na origem e no destino (notas, quadros ou grupos) para ligar com seta · Esc cancela.' : 'Arraste os cartões pelo título · Arraste as bolinhas nas bordas para ligar com seta · Roda amplia';
       for (const button of this.contentEl.querySelectorAll('.ia-toolbar .ia-tool')) {
         const label = button.getAttribute('aria-label');
         if (['Alfinete', 'Área', 'Conectar', 'Mover', 'Desenhar'].includes(label)) button.toggleClass('is-active', label === ({ pin: 'Alfinete', area: 'Área', connect: 'Conectar', select: 'Mover', draw: 'Desenhar' })[this.mode]);
@@ -4034,7 +4035,7 @@ class AtlasView extends TextFileView {
     this.button(toolbar, 'Estudar todos os flashcards', 'layers', () => this.reviewBoardFlashcards());
     this.button(toolbar, 'Alfinete', 'map-pin-plus', () => this.setMode('pin'), this.mode === 'pin');
     this.button(toolbar, 'Área', 'scan', () => this.setMode('area'), this.mode === 'area');
-    this.button(toolbar, 'Conectar', 'waypoints', () => this.setMode('connect'), this.mode === 'connect');
+    this.button(toolbar, 'Seta', 'arrow-up-right', () => this.setMode('connect'), this.mode === 'connect');
     this.button(toolbar, 'Mover', 'mouse-pointer-2', () => this.setMode('select'), this.mode === 'select');
     this.button(toolbar, 'Desenhar', 'pencil', () => this.setMode('draw'), this.mode === 'draw');
     this.button(toolbar, 'Grade do quadro', 'grid', () => this.toggleGrid());
@@ -4124,7 +4125,7 @@ class AtlasView extends TextFileView {
       if (e.target !== this.viewport && e.target !== this.world && e.target !== this.nodesEl && e.target !== this.edgesEl && e.target !== this.drawingsEl && !e.target.closest?.('.ia-draw-svg')) return;
       if (e.button !== 0 && e.button !== 1) return;
       e.preventDefault(); this.viewport.focus();
-      this.multiSelection?.clear(); this.selectedGroup = null; this.selected = null; this.highlight(); this.showSelection();
+      this.multiSelection?.clear(); this.selectedGroup = null; this.selected = null; this.selectedEdge = null; this.hideEdgeToolbar(); this.highlight(); this.drawEdges(); this.showSelection();
       this.drag = { type: 'pan', cx: e.clientX, cy: e.clientY, x: this.board.camera.x, y: this.board.camera.y, pointerId: e.pointerId };
     };
     this.viewport.onwheel = e => {
@@ -4177,7 +4178,17 @@ class AtlasView extends TextFileView {
           return;
         }
       }
-      if (e.key === 'Escape') { this.pendingMindMove = null; this.pendingAreaPin = null; this.pendingMapPin = null; this.multiSelection?.clear(); this.selectedGroup = null; this.mode = 'select'; this.source = null; this.render(); }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedEdge && !e.target.closest('input,textarea,select,[contenteditable=true]')) {
+        e.preventDefault();
+        const edge = this.board.edges.find(item => item.id === this.selectedEdge);
+        if (edge && !edge.mindTree) {
+          this.checkpoint();
+          this.board.edges = this.board.edges.filter(item => item.id !== edge.id);
+          this.selectedEdge = null; this.hideEdgeToolbar(); this.changed(); this.render();
+        }
+        return;
+      }
+      if (e.key === 'Escape') { this.pendingMindMove = null; this.pendingAreaPin = null; this.pendingMapPin = null; this.multiSelection?.clear(); this.selectedGroup = null; this.selectedEdge = null; this.hideEdgeToolbar(); this.mode = 'select'; this.source = null; this.render(); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g' && !e.target.closest('input,textarea,select,[contenteditable=true]')) { e.preventDefault(); this.createGroup(); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); this.undo(e.shiftKey); }
     };
@@ -4434,6 +4445,11 @@ class AtlasView extends TextFileView {
     for (const n of this.webNodes || []) { const el = this.nodeElements?.get(n.id); if (el) this.place(el, n); }
     if (this.zoomLabel) this.zoomLabel.textContent = `${Math.round(c.z * 100)}%`;
     if (this.canvasZoomLabel) this.canvasZoomLabel.textContent = `${Math.round(c.z * 100)}%`;
+    if (this.edgeToolbarEl && this.selectedEdge) {
+      const edge = this.board.edges.find(e => e.id === this.selectedEdge);
+      if (edge) this.showEdgeToolbar(edge);
+      else this.hideEdgeToolbar();
+    }
     const detail = c.z >= .35;
     if (this.notePreviewDetail !== detail) {
       this.notePreviewDetail = detail;
@@ -4977,7 +4993,7 @@ class AtlasView extends TextFileView {
         preview.createDiv({ cls: 'ia-muted', text: 'Whiteboard vinculado' });
         if (this.subboardObserver) this.subboardObserver.observe(preview); else { preview._atlasBoardVisible = true; this.renderSubboardPreview(n, preview); }
         const open = this.button(el, 'Abrir whiteboard', 'arrow-up-right', () => this.navigateWhiteboard(n.path)); open.addClass('ia-board-open'); open.onpointerdown = e => e.stopPropagation();
-        el.onclick = e => { if (e.target.closest('button,a')) return; this.selected = { node: n.id }; this.highlight(); this.showSelection(); };
+        el.onclick = e => { if (e.target.closest('button,a')) return; if (this.mode === 'connect') { this.connect({ node: n.id }); return; } this.selected = { node: n.id }; this.highlight(); this.showSelection(); };
         el.ondblclick = e => { if (e.target.closest('button,input')) return; e.preventDefault(); e.stopPropagation(); this.navigateWhiteboard(n.path); };
       } else {
         const quick = el.createDiv({ cls: 'ia-node-quick-actions' });
@@ -4998,6 +5014,7 @@ class AtlasView extends TextFileView {
       const resize = el.createEl('button', { cls: 'ia-resize', attr: { 'aria-label': 'Redimensionar cartão' } }); setIcon(resize, 'grip');
       if (n.relation || (n.type === 'mind' && !n.noteExpanded)) resize.style.display = 'none';
       resize.onpointerdown = e => { e.preventDefault(); e.stopPropagation(); this.drag = { type: 'resize', node: n, cx: e.clientX, cy: e.clientY, w: n.w, h: n.h, pointerId: e.pointerId, pendingCheckpoint: true }; };
+      if (n.type !== 'mind') this.attachConnectPorts(el, { node: n.id });
       if (n.type === 'web') this.place(el, n);
     }
     this.highlight(); this.drawGroups();
@@ -5037,6 +5054,10 @@ class AtlasView extends TextFileView {
       const grouped = d.node && this.board.groups?.some(g => this.groupContents(g).some(n => n.id === d.node.id));
       this.checkpoint(d.type === 'group' || grouped ? 'board' : 'content'); d.pendingCheckpoint = false;
     }
+    if (d.type === 'connect') {
+      this.updateConnectPreview(e.clientX, e.clientY);
+      return;
+    }
     if (d.type === 'draw') {
       const pos = this.toWorld(e.clientX, e.clientY);
       const points = d.stroke.points;
@@ -5056,7 +5077,9 @@ class AtlasView extends TextFileView {
     if (d.type === 'group') {
       d.group.x = d.x + dx / z; d.group.y = d.y + dy / z;
       for (const item of d.branch) { item.node.x = item.x + dx / z; item.node.y = item.y + dy / z; const el = this.nodeElements.get(item.node.id); if (el) this.place(el, item.node); }
-      this.drawEdges(new Set(d.branch.map(item => item.node.id))); this.drawGroups(true); return;
+      this.drawGroups(true);
+      this.drawEdges(new Set([...d.branch.map(item => item.node.id), `group:${d.group.id}`]));
+      return;
     }
     if (d.type === 'node') { d.node.x = d.x + dx / z; d.node.y = d.y + dy / z; this.place(this.nodeElements.get(d.node.id), d.node); dirtyEdges.add(d.node.id); for (const item of d.branch || []) { item.node.x = item.x + dx / z; item.node.y = item.y + dy / z; const el = this.nodeElements.get(item.node.id); if (el) this.place(el, item.node); dirtyEdges.add(item.node.id); } }
     if (d.type === 'pin' && (d.moved || Math.hypot(dx, dy) > 4)) {
@@ -5072,7 +5095,10 @@ class AtlasView extends TextFileView {
       const proxy = this.board.nodes.find(n => n.id === d.node.visualChildOf);
       if (proxy) { proxy.x = d.node.x; proxy.y = d.node.y; proxy.w = d.node.w; proxy.h = d.node.h; dirtyEdges.add(proxy.id); }
       this.alignVisualChildren(true, dirtyEdges);
-      if (this.board.groups?.length) this.drawGroups(true);
+      if (this.board.groups?.length) {
+        this.drawGroups(true);
+        for (const g of this.board.groups) dirtyEdges.add(`group:${g.id}`);
+      }
     }
     if (dirtyEdges.size) this.drawEdges(dirtyEdges);
   }
@@ -5080,6 +5106,13 @@ class AtlasView extends TextFileView {
     if (this.motionFrame !== null) { this.contentEl.ownerDocument.defaultView.cancelAnimationFrame(this.motionFrame); this.motionFrame = null; }
     if (this.pendingMotion) { const event = this.pendingMotion; this.pendingMotion = null; this.move(event); }
     if (this.drag) {
+      if (this.drag.type === 'connect') {
+        const dragConnect = this.drag;
+        try { if (this.viewport?.hasPointerCapture(dragConnect.pointerId)) this.viewport.releasePointerCapture(dragConnect.pointerId); } catch {}
+        this.drag = null;
+        this.finishConnectDrag(dragConnect);
+        return;
+      }
       if (this.drag.type === 'draw') {
         try { if (this.viewport?.hasPointerCapture(this.drag.pointerId)) this.viewport.releasePointerCapture(this.drag.pointerId); } catch {}
         this.drag = null;
@@ -5162,15 +5195,280 @@ class AtlasView extends TextFileView {
       this.changed(false, visual);
     }
   }
-  highlight() { for (const [id, el] of this.nodeElements || []) el.toggleClass('is-selected', id === this.selected?.node || id === this.source?.node || this.multiSelection?.has(id)); }
-  endpoint(point, other) {
+  highlight() {
+    for (const [id, el] of this.nodeElements || []) el.toggleClass('is-selected', id === this.selected?.node || id === this.source?.node || this.multiSelection?.has(id));
+    for (const [id, frame] of this.groupElements || []) frame.toggleClass('is-connect-source', this.source?.group === id);
+  }
+  groupBox(group) {
+    if (!group) return null;
+    const nodes = this.groupGeometry?.get(group.id) || this.groupContents(group).filter(n => this.nodeElements?.has(n.id));
+    let left = group.x, top = group.y, right = left + 440, bottom = top + 280;
+    if (nodes.length) {
+      left = Infinity; top = Infinity; right = -Infinity; bottom = -Infinity;
+      for (const node of nodes) { left = Math.min(left, node.x - 24); top = Math.min(top, node.y - 62); right = Math.max(right, node.x + node.w + 24); bottom = Math.max(bottom, node.y + node.h + 66); }
+    }
+    return { x: left, y: top, w: right - left, h: bottom - top };
+  }
+  endpointBox(point) {
+    if (!point) return null;
+    if (point.group) {
+      const group = this.board.groups?.find(g => g.id === point.group);
+      return group ? this.groupBox(group) : null;
+    }
+    let n = this.nodeById?.get(point.node); if (!n) return null;
+    if (!point.pin && this.noteMapOwners?.has(n.id)) n = this.noteMapOwners.get(n.id);
+    if (!point.pin && n.visualAsChild && n.visualExpanded && n.linkedVisualRoot) n = this.nodeById.get(n.linkedVisualRoot) || n;
+    const h = n.type === 'mind' ? (n.noteExpanded ? 40 : n.h) : (n.h + 42);
+    return { x: n.x, y: n.y, w: n.w, h, node: n };
+  }
+  endpoint(point, otherPoint, isMindTree = false) {
+    if (!point) return null;
+    if (point.group) {
+      const box = this.endpointBox(point); if (!box) return null;
+      const otherBox = otherPoint && typeof otherPoint.x === 'number' && typeof otherPoint.w === 'number' ? otherPoint : this.endpointBox(otherPoint);
+      let side = point.side;
+      if (!side) {
+        const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+        const ox = otherBox ? otherBox.x + (otherBox.w || 0) / 2 : cx + 100;
+        const oy = otherBox ? otherBox.y + (otherBox.h || 0) / 2 : cy;
+        const dx = ox - cx, dy = oy - cy;
+        side = Math.abs(dy) > Math.abs(dx) * 1.15 ? (dy >= 0 ? 'bottom' : 'top') : (dx >= 0 ? 'right' : 'left');
+      }
+      if (side === 'top') return { x: box.x + box.w / 2, y: box.y, side };
+      if (side === 'bottom') return { x: box.x + box.w / 2, y: box.y + box.h, side };
+      if (side === 'left') return { x: box.x, y: box.y + box.h / 2, side };
+      return { x: box.x + box.w, y: box.y + box.h / 2, side: 'right' };
+    }
     let n = this.nodeById?.get(point.node); if (!n) return null;
     if (!point.pin && this.noteMapOwners?.has(n.id)) n = this.noteMapOwners.get(n.id);
     if (!point.pin && n.visualAsChild && n.visualExpanded && n.linkedVisualRoot) n = this.nodeById.get(n.linkedVisualRoot) || n;
     const p = point.pin && n.pins?.find(item => item.id === point.pin);
-    if (p) return n.type === 'web' ? { x: n.x + n.w, y: n.y + 42 + Math.min(n.h - 20, 155 + n.pins.indexOf(p) * 36) } : { x: n.x + p.u * n.w, y: n.y + 42 + p.v * n.h };
-    const right = !other || other.x >= n.x + n.w / 2;
-    return { x: n.x + (right ? n.w : 0), y: n.y + (n.type === 'mind' ? (n.noteExpanded ? 20 : n.h / 2) : (n.type === 'note' || n.type === 'whiteboard' ? (n.h + 42) / 2 : 42 + n.h / 2)) };
+    if (p) return n.type === 'web' ? { x: n.x + n.w, y: n.y + 42 + Math.min(n.h - 20, 155 + n.pins.indexOf(p) * 36), side: 'right' } : { x: n.x + p.u * n.w, y: n.y + 42 + p.v * n.h, side: 'right' };
+    const box = { x: n.x, y: n.y, w: n.w, h: n.type === 'mind' ? (n.noteExpanded ? 40 : n.h) : (n.h + 42) };
+    const otherBox = otherPoint && typeof otherPoint.x === 'number' && typeof otherPoint.w === 'number' ? otherPoint : (otherPoint?.node || otherPoint?.group ? this.endpointBox(otherPoint) : otherPoint);
+    if (isMindTree) {
+      const right = !otherBox || otherBox.x >= n.x + n.w / 2;
+      return { x: n.x + (right ? n.w : 0), y: n.y + (n.type === 'mind' ? (n.noteExpanded ? 20 : n.h / 2) : (n.type === 'note' || n.type === 'whiteboard' ? (n.h + 42) / 2 : 42 + n.h / 2)), side: right ? 'right' : 'left' };
+    }
+    let side = point.side;
+    if (!side) {
+      const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+      const ox = otherBox ? otherBox.x + (otherBox.w || 0) / 2 : cx + 100;
+      const oy = otherBox ? otherBox.y + (otherBox.h || 0) / 2 : cy;
+      const dx = ox - cx, dy = oy - cy;
+      side = Math.abs(dy) > Math.abs(dx) * 1.15 ? (dy >= 0 ? 'bottom' : 'top') : (dx >= 0 ? 'right' : 'left');
+    }
+    if (side === 'top') return { x: box.x + box.w / 2, y: box.y, side };
+    if (side === 'bottom') return { x: box.x + box.w / 2, y: box.y + box.h, side };
+    if (side === 'left') return { x: box.x, y: box.y + box.h / 2, side };
+    return { x: box.x + box.w, y: box.y + box.h / 2, side: 'right' };
+  }
+  edgeCurve(a, b, isMindTree = false) {
+    if (isMindTree) {
+      const bend = Math.max(65, Math.abs(b.x - a.x) * .45), direction = b.x >= a.x ? 1 : -1;
+      const cp1x = a.x + bend * direction, cp1y = a.y, cp2x = b.x - bend * direction, cp2y = b.y;
+      return { d: `M ${a.x} ${a.y} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${b.x} ${b.y}`, cp1x, cp1y, cp2x, cp2y, midX: (a.x + b.x) / 2, midY: (a.y + b.y) / 2 };
+    }
+    const vec = side => side === 'top' ? [0, -1] : side === 'bottom' ? [0, 1] : side === 'left' ? [-1, 0] : [1, 0];
+    const [ox1, oy1] = vec(a.side || 'right');
+    const [ox2, oy2] = vec(b.side || 'left');
+    const dist = Math.hypot(b.x - a.x, b.y - a.y);
+    const bend = Math.max(55, Math.min(240, dist * 0.38));
+    const cp1x = a.x + ox1 * bend, cp1y = a.y + oy1 * bend;
+    const cp2x = b.x + ox2 * bend, cp2y = b.y + oy2 * bend;
+    const midX = 0.125 * a.x + 0.375 * cp1x + 0.375 * cp2x + 0.125 * b.x;
+    const midY = 0.125 * a.y + 0.375 * cp1y + 0.375 * cp2y + 0.125 * b.y;
+    return { d: `M ${a.x} ${a.y} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${b.x} ${b.y}`, cp1x, cp1y, cp2x, cp2y, midX, midY };
+  }
+  arrowHeadPath(tipX, tipY, fromX, fromY, size = 11) {
+    const angle = Math.atan2(tipY - fromY, tipX - fromX);
+    const spread = 0.44;
+    const x1 = tipX - size * Math.cos(angle - spread);
+    const y1 = tipY - size * Math.sin(angle - spread);
+    const x2 = tipX - size * Math.cos(angle + spread);
+    const y2 = tipY - size * Math.sin(angle + spread);
+    return `M ${tipX} ${tipY} L ${x1} ${y1} L ${x2} ${y2} Z`;
+  }
+  attachConnectPorts(container, targetRef) {
+    for (const old of container.querySelectorAll(':scope > .ia-connect-port')) old.remove();
+    for (const side of ['top', 'right', 'bottom', 'left']) {
+      const port = container.createEl('button', {
+        cls: `ia-connect-port is-${side}`,
+        attr: { type: 'button', tabindex: '-1', title: 'Arraste para ligar com seta', 'aria-label': `Ligar seta (${side})` }
+      });
+      port.dataset.connectSide = side;
+      if (targetRef.node) port.dataset.connectNode = targetRef.node;
+      if (targetRef.group) port.dataset.connectGroup = targetRef.group;
+      port.onpointerdown = e => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        this.viewport.focus();
+        const from = { ...targetRef, side };
+        this.drag = { type: 'connect', from, pointerId: e.pointerId, target: null };
+        try { this.viewport.setPointerCapture(e.pointerId); } catch {}
+        this.updateConnectPreview(e.clientX, e.clientY);
+      };
+      port.onclick = e => e.stopPropagation();
+    }
+  }
+  findConnectTargetAt(clientX, clientY, fromRef) {
+    const doc = this.contentEl.ownerDocument;
+    const elements = typeof doc.elementsFromPoint === 'function' ? doc.elementsFromPoint(clientX, clientY) : [];
+    for (const el of elements) {
+      if (el.classList?.contains('ia-connect-port')) {
+        const node = el.dataset.connectNode, group = el.dataset.connectGroup, side = el.dataset.connectSide;
+        if (node && !(fromRef.node && fromRef.node === node)) return { node, side };
+        if (group && !(fromRef.group && fromRef.group === group)) return { group, side };
+      }
+      const card = el.closest?.('.ia-card[data-atlas-node-id]');
+      if (card) {
+        const node = card.dataset.atlasNodeId;
+        if (node && !(fromRef.node && fromRef.node === node)) return { node };
+      }
+      const groupEl = el.closest?.('.ia-group-frame[data-atlas-group-id]');
+      if (groupEl) {
+        const group = groupEl.dataset.atlasGroupId;
+        if (group && !(fromRef.group && fromRef.group === group)) return { group };
+      }
+    }
+    return null;
+  }
+  clearConnectPreview() {
+    this.previewEdgePath?.remove(); this.previewEdgePath = null;
+    this.previewEdgeHead?.remove(); this.previewEdgeHead = null;
+    for (const el of this.contentEl.querySelectorAll('.is-connect-hover')) el.classList.remove('is-connect-hover');
+  }
+  updateConnectPreview(clientX, clientY) {
+    if (!this.drag || this.drag.type !== 'connect' || !this.edgeSvg) return;
+    const doc = this.contentEl.ownerDocument, ns = 'http://www.w3.org/2000/svg';
+    const worldPos = this.toWorld(clientX, clientY);
+    const hovered = this.findConnectTargetAt(clientX, clientY, this.drag.from);
+    this.drag.target = hovered;
+    for (const el of this.contentEl.querySelectorAll('.is-connect-hover')) el.classList.remove('is-connect-hover');
+    if (hovered?.node) this.nodeElements?.get(hovered.node)?.classList.add('is-connect-hover');
+    if (hovered?.group) this.groupElements?.get(hovered.group)?.classList.add('is-connect-hover');
+    const a = this.endpoint(this.drag.from, hovered || { x: worldPos.x, y: worldPos.y, w: 0, h: 0 }, false);
+    if (!a) return;
+    const b = hovered
+      ? this.endpoint(hovered, this.drag.from, false)
+      : { x: worldPos.x, y: worldPos.y, side: Math.abs(worldPos.y - a.y) > Math.abs(worldPos.x - a.x) ? (worldPos.y >= a.y ? 'top' : 'bottom') : (worldPos.x >= a.x ? 'left' : 'right') };
+    if (!b) return;
+    const curve = this.edgeCurve(a, b, false);
+    if (!this.previewEdgePath) {
+      this.previewEdgePath = doc.createElementNS(ns, 'path');
+      this.previewEdgePath.setAttribute('class', 'ia-line ia-line-preview');
+      this.previewEdgePath.setAttribute('vector-effect', 'non-scaling-stroke');
+      this.edgeSvg.appendChild(this.previewEdgePath);
+    }
+    if (!this.previewEdgeHead) {
+      this.previewEdgeHead = doc.createElementNS(ns, 'path');
+      this.previewEdgeHead.setAttribute('class', 'ia-arrow-head ia-line-preview-head');
+      this.edgeSvg.appendChild(this.previewEdgeHead);
+    }
+    this.previewEdgePath.setAttribute('d', curve.d);
+    this.previewEdgeHead.setAttribute('d', this.arrowHeadPath(b.x, b.y, curve.cp2x, curve.cp2y, 12));
+  }
+  finishConnectDrag(dragConnect) {
+    this.clearConnectPreview();
+    const to = dragConnect?.target;
+    if (!to) return;
+    const from = dragConnect.from;
+    const same = (from.node && to.node && from.node === to.node) || (from.group && to.group && from.group === to.group);
+    if (same) return;
+    this.createArrowEdge(from, to);
+  }
+  createArrowEdge(from, to) {
+    const key = ep => ep.group ? `g:${ep.group}` : `n:${ep.node}:${ep.pin || ''}`;
+    const existing = this.board.edges.find(e => !e.mindTree && key(e.from) === key(from) && key(e.to) === key(to));
+    if (existing) {
+      if (from.side) existing.from.side = from.side;
+      if (to.side) existing.to.side = to.side;
+      this.selectedEdge = existing.id;
+      this.drawEdges();
+      this.showEdge(existing);
+      this.showEdgeToolbar(existing);
+      return existing;
+    }
+    this.checkpoint();
+    const edge = {
+      id: uid(),
+      from,
+      to,
+      color: COLORS[this.board.edges.length % COLORS.length],
+      arrowEnd: true,
+      arrowStart: false,
+      lineStyle: 'solid'
+    };
+    this.board.edges.push(edge);
+    this.selectedEdge = edge.id;
+    this.selected = null; this.selectedGroup = null;
+    this.changed();
+    this.drawEdges();
+    this.highlight();
+    this.showEdge(edge);
+    this.showEdgeToolbar(edge);
+    return edge;
+  }
+  hideEdgeToolbar() {
+    this.edgeToolbarEl?.remove();
+    this.edgeToolbarEl = null;
+  }
+  showEdgeToolbar(edge) {
+    this.hideEdgeToolbar();
+    if (!edge || edge.mindTree || !this.viewport) return;
+    const a = this.endpoint(edge.from, edge.to, false);
+    const b = this.endpoint(edge.to, edge.from, false);
+    if (!a || !b) return;
+    const curve = this.edgeCurve(a, b, false);
+    const c = this.board.camera;
+    const screenX = c.x + curve.midX * c.z;
+    const screenY = c.y + curve.midY * c.z;
+    const bar = this.edgeToolbarEl = this.viewport.createDiv({ cls: 'ia-edge-toolbar' });
+    bar.onpointerdown = e => e.stopPropagation();
+    bar.onclick = e => e.stopPropagation();
+    const rect = this.viewport.getBoundingClientRect();
+    bar.style.left = `${Math.max(12, Math.min(rect.width - 340, screenX - 160))}px`;
+    bar.style.top = `${Math.max(12, Math.min(rect.height - 54, screenY - 52))}px`;
+
+    const swatches = bar.createDiv({ cls: 'ia-edge-swatches' });
+    for (const color of COLORS.slice(0, 6)) {
+      const sw = swatches.createEl('button', { cls: `ia-edge-swatch${(edge.color || COLORS[0]) === color ? ' is-active' : ''}`, attr: { type: 'button', title: 'Cor da seta' } });
+      sw.style.background = color;
+      sw.onclick = () => { this.checkpoint(); edge.color = color; this.changed(); this.drawEdges(); this.showEdgeToolbar(edge); if (this.sidebarOpen) this.showEdge(edge); };
+    }
+    const addBtn = (text, title, active, run) => {
+      const btn = bar.createEl('button', { cls: `ia-edge-tool-btn${active ? ' is-active' : ''}`, text, attr: { type: 'button', title } });
+      btn.onclick = () => { run(); this.showEdgeToolbar(edge); if (this.sidebarOpen) this.showEdge(edge); };
+      return btn;
+    };
+    const isEnd = edge.arrowEnd !== false;
+    const isStart = Boolean(edge.arrowStart);
+    addBtn(isStart && isEnd ? '↔' : isEnd ? '→' : '—', 'Alternar pontas da seta (→ / ↔ / —)', isEnd || isStart, () => {
+      this.checkpoint();
+      if (isEnd && !isStart) { edge.arrowStart = true; edge.arrowEnd = true; }
+      else if (isEnd && isStart) { edge.arrowStart = false; edge.arrowEnd = false; }
+      else { edge.arrowStart = false; edge.arrowEnd = true; }
+      this.changed(); this.drawEdges();
+    });
+    addBtn('⇄', 'Inverter direção da seta', false, () => {
+      this.checkpoint();
+      const tmp = edge.from; edge.from = edge.to; edge.to = tmp;
+      this.changed(); this.drawEdges();
+    });
+    const style = edge.lineStyle || 'solid';
+    addBtn(style === 'dashed' ? '- -' : style === 'dotted' ? '···' : '━━', 'Estilo da linha (Sólida / Tracejada / Pontilhada)', style !== 'solid', () => {
+      this.checkpoint();
+      edge.lineStyle = style === 'solid' ? 'dashed' : style === 'dashed' ? 'dotted' : 'solid';
+      this.changed(); this.drawEdges();
+    });
+    addBtn('Aa', 'Adicionar / editar rótulo na seta', Boolean(edge.label), () => this.editEdgeLabel(edge));
+    const del = bar.createEl('button', { cls: 'ia-edge-tool-btn is-danger', attr: { type: 'button', title: 'Remover seta (Delete)' } });
+    setIcon(del, 'trash-2');
+    del.onclick = () => {
+      this.checkpoint();
+      this.board.edges = this.board.edges.filter(item => item !== edge);
+      this.selectedEdge = null; this.hideEdgeToolbar(); this.changed(); this.render();
+    };
   }
   /** Reuse SVG elements; dragging touches only the moved node's adjacent connectors. */
   drawEdges(nodeId) {
@@ -5183,40 +5481,82 @@ class AtlasView extends TextFileView {
     }
     if (!nodeId) {
       const live = new Set(this.board.edges.map(e => e.id));
-      for (const [id, pair] of this.edgeElements) if (!live.has(id)) { pair.path.remove(); pair.dot.remove(); pair.label?.remove(); this.edgeElements.delete(id); }
+      for (const [id, pair] of this.edgeElements) if (!live.has(id)) { pair.hit?.remove(); pair.path.remove(); pair.dot?.remove(); pair.arrowEnd?.remove(); pair.arrowStart?.remove(); pair.label?.remove(); this.edgeElements.delete(id); }
       this.edgeAdjacency = new Map();
-      for (const e of this.board.edges) for (const id of new Set([e.from.node, e.to.node])) {
+      const epKey = ep => ep?.group ? `group:${ep.group}` : ep?.node;
+      for (const e of this.board.edges) for (const id of new Set([epKey(e.from), epKey(e.to)].filter(Boolean))) {
         if (!this.edgeAdjacency.has(id)) this.edgeAdjacency.set(id, []); this.edgeAdjacency.get(id).push(e);
       }
     }
     const edges = nodeId instanceof Set ? affectedEdges(this.edgeAdjacency, nodeId) : nodeId ? this.edgeAdjacency.get(nodeId) || [] : this.board.edges;
     for (const e of edges) {
-      const hidden = [e.from.node, e.to.node].some(id => this.hiddenVisualNodes.has(id) || (this.nodeById.get(id)?.type === 'mind' && !this.visibleMind.has(id))) || (e.visualLink && (!this.nodeById.get(e.from.node)?.visualExpanded || this.nodeById.get(e.from.node)?.visualAsChild)) || (e.noteMap && this.noteMapOwners?.has(e.to.node));
-      const existing = this.edgeElements.get(e.id); if (existing && existing.hidden !== hidden) { existing.path.style.display = hidden ? 'none' : ''; existing.dot.style.display = hidden ? 'none' : ''; if (existing.label) existing.label.style.display = hidden ? 'none' : ''; existing.hidden = hidden; } if (hidden) continue;
-      const targetNode = this.nodeById.get(e.to.node), sourceNode = this.nodeById.get(e.from.node);
-      const a = this.endpoint(e.from, targetNode), b = this.endpoint(e.to, sourceNode); if (!a || !b) continue;
-      const geometry = `${a.x}:${a.y}:${b.x}:${b.y}:${e.color}:${e.label || ''}`;
+      const hidden = [e.from.node, e.to.node].filter(Boolean).some(id => this.hiddenVisualNodes.has(id) || (this.nodeById.get(id)?.type === 'mind' && !this.visibleMind.has(id))) || (e.visualLink && (!this.nodeById.get(e.from.node)?.visualExpanded || this.nodeById.get(e.from.node)?.visualAsChild)) || (e.noteMap && this.noteMapOwners?.has(e.to.node));
+      const existing = this.edgeElements.get(e.id);
+      if (existing && existing.hidden !== hidden) {
+        const disp = hidden ? 'none' : '';
+        if (existing.hit) existing.hit.style.display = disp;
+        existing.path.style.display = disp;
+        if (existing.dot) existing.dot.style.display = disp;
+        if (existing.arrowEnd) existing.arrowEnd.style.display = disp;
+        if (existing.arrowStart) existing.arrowStart.style.display = disp;
+        if (existing.label) existing.label.style.display = disp;
+        existing.hidden = hidden;
+      }
+      if (hidden) continue;
+      const a = this.endpoint(e.from, e.to, Boolean(e.mindTree)), b = this.endpoint(e.to, e.from, Boolean(e.mindTree)); if (!a || !b) continue;
+      const isSelected = this.selectedEdge === e.id;
+      const showArrowEnd = e.mindTree ? false : (e.arrowEnd !== false);
+      const showArrowStart = e.mindTree ? false : Boolean(e.arrowStart);
+      const lineStyle = e.lineStyle || 'solid';
+      const geometry = `${a.x}:${a.y}:${a.side}:${b.x}:${b.y}:${b.side}:${e.color}:${e.label || ''}:${showArrowEnd}:${showArrowStart}:${lineStyle}:${isSelected}`;
       if (existing?.geometry === geometry) continue;
       let pair = this.edgeElements.get(e.id);
       if (!pair) {
+        const hit = doc.createElementNS(ns, 'path');
+        hit.setAttribute('class', 'ia-line-hit');
+        hit.setAttribute('vector-effect', 'non-scaling-stroke');
         const path = doc.createElementNS(ns, 'path'), dot = doc.createElementNS(ns, 'circle');
         path.setAttribute('class', e.mindTree ? 'ia-line ia-mind-edge' : 'ia-line'); path.setAttribute('vector-effect', 'non-scaling-stroke'); dot.setAttribute('r', e.mindTree ? '3' : '4');
         if (e.mindTree) dot.setAttribute('class', 'ia-mind-dot');
+        const arrowEnd = doc.createElementNS(ns, 'path'); arrowEnd.setAttribute('class', 'ia-arrow-head');
+        const arrowStart = doc.createElementNS(ns, 'path'); arrowStart.setAttribute('class', 'ia-arrow-head');
+        this.bindEdgeActions(hit, e.id);
         this.bindEdgeActions(path, e.id);
-        this.edgeSvg.appendChild(path); this.edgeSvg.appendChild(dot); pair = { path, dot }; this.edgeElements.set(e.id, pair);
+        this.bindEdgeActions(arrowEnd, e.id);
+        this.bindEdgeActions(arrowStart, e.id);
+        this.edgeSvg.append(hit, path, dot, arrowEnd, arrowStart);
+        pair = { hit, path, dot, arrowEnd, arrowStart };
+        this.edgeElements.set(e.id, pair);
       }
       pair.geometry = geometry; pair.hidden = false;
-      if (e.mindTree) {
-        pair.path.classList.add('ia-mind-edge');
-        pair.dot.classList.add('ia-mind-dot');
-      } else {
-        pair.path.classList.remove('ia-mind-edge');
-        pair.dot.classList.remove('ia-mind-dot');
-      }
-      const bend = Math.max(65, Math.abs(b.x - a.x) * .45), direction = b.x >= a.x ? 1 : -1;
-      pair.path.setAttribute('d', 'M ' + a.x + ' ' + a.y + ' C ' + (a.x + bend * direction) + ' ' + a.y + ', ' + (b.x - bend * direction) + ' ' + b.y + ', ' + b.x + ' ' + b.y);
+      pair.path.classList.toggle('ia-mind-edge', Boolean(e.mindTree));
+      pair.path.classList.toggle('is-selected', isSelected);
+      pair.dot.classList.toggle('ia-mind-dot', Boolean(e.mindTree));
+      const curve = this.edgeCurve(a, b, Boolean(e.mindTree));
+      pair.hit.setAttribute('d', curve.d);
+      pair.path.setAttribute('d', curve.d);
+      if (lineStyle === 'dashed') pair.path.setAttribute('stroke-dasharray', '9 6');
+      else if (lineStyle === 'dotted') pair.path.setAttribute('stroke-dasharray', '2.5 5');
+      else pair.path.removeAttribute('stroke-dasharray');
       const color = /^#[0-9a-f]{6}$/i.test(e.color) ? e.color : COLORS[0];
-      pair.path.setAttribute('stroke', color); pair.dot.setAttribute('cx', b.x); pair.dot.setAttribute('cy', b.y); pair.dot.setAttribute('fill', color);
+      pair.path.setAttribute('stroke', color);
+      if (showArrowEnd) {
+        pair.dot.style.display = 'none';
+        pair.arrowEnd.style.display = '';
+        pair.arrowEnd.setAttribute('d', this.arrowHeadPath(b.x, b.y, curve.cp2x, curve.cp2y, 11));
+        pair.arrowEnd.setAttribute('fill', color);
+      } else {
+        pair.arrowEnd.style.display = 'none';
+        pair.dot.style.display = '';
+        pair.dot.setAttribute('cx', b.x); pair.dot.setAttribute('cy', b.y); pair.dot.setAttribute('fill', color);
+      }
+      if (showArrowStart) {
+        pair.arrowStart.style.display = '';
+        pair.arrowStart.setAttribute('d', this.arrowHeadPath(a.x, a.y, curve.cp1x, curve.cp1y, 11));
+        pair.arrowStart.setAttribute('fill', color);
+      } else {
+        pair.arrowStart.style.display = 'none';
+      }
       if (e.label) {
         if (!pair.label) {
           const label = doc.createElementNS(ns, 'g'), rect = doc.createElementNS(ns, 'rect'), text = doc.createElementNS(ns, 'text');
@@ -5225,25 +5565,38 @@ class AtlasView extends TextFileView {
           this.edgeSvg.appendChild(label); pair.label = label;
         }
         const title = e.label.length > 44 ? e.label.slice(0, 43) + '…' : e.label, width = Math.min(360, title.length * 8 + 24);
-        pair.label.setAttribute('transform', `translate(${(a.x + b.x) / 2},${(a.y + b.y) / 2})`);
+        pair.label.setAttribute('transform', `translate(${curve.midX},${curve.midY})`);
         const rect = pair.label.querySelector('rect'); rect.setAttribute('x', String(-width / 2)); rect.setAttribute('y', '-14'); rect.setAttribute('width', String(width)); rect.setAttribute('height', '28'); pair.label.querySelector('text').textContent = title;
       } else if (pair.label) { pair.label.remove(); pair.label = null; }
     }
   }
 
   bindEdgeActions(element, edgeId) {
-    element.onclick = event => { event.stopPropagation(); const edge = this.board.edges.find(e => e.id === edgeId); if (edge) this.showEdge(edge); };
+    element.onpointerdown = event => event.stopPropagation();
+    element.onclick = event => {
+      event.stopPropagation();
+      const edge = this.board.edges.find(e => e.id === edgeId);
+      if (!edge) return;
+      this.selectedEdge = edge.id;
+      this.selected = null; this.selectedGroup = null;
+      this.highlight();
+      this.drawEdges();
+      this.showEdge(edge);
+      if (!edge.mindTree) this.showEdgeToolbar(edge);
+      else this.hideEdgeToolbar();
+    };
     const rename = event => { event.preventDefault(); event.stopPropagation(); const edge = this.board.edges.find(e => e.id === edgeId); if (edge) this.editEdgeLabel(edge); };
     element.ondblclick = rename;
     element.oncontextmenu = rename;
   }
   connect(point) {
-    if (!this.source) { this.source = point; this.selected = point; this.highlight(); this.hint.textContent = 'Agora clique na imagem, no cartão ou no alfinete de destino.'; return; }
-    if (this.source.node === point.node && this.source.pin === point.pin) { this.source = null; this.highlight(); return; }
-    if (!this.board.edges.some(e => JSON.stringify(e.from) === JSON.stringify(this.source) && JSON.stringify(e.to) === JSON.stringify(point))) {
-      this.checkpoint(); this.board.edges.push({ id: uid(), from: this.source, to: point, color: COLORS[this.board.edges.length % COLORS.length] }); this.changed();
-    }
-    this.source = null; this.mode = 'select'; this.render();
+    if (!this.source) { this.source = point; this.selected = point.node ? point : null; this.highlight(); this.hint.textContent = 'Agora clique na nota, quadro, grupo ou alfinete de destino.'; return; }
+    const same = (this.source.node && point.node && this.source.node === point.node && this.source.pin === point.pin) || (this.source.group && point.group && this.source.group === point.group);
+    if (same) { this.source = null; this.highlight(); return; }
+    const from = this.source;
+    this.source = null; this.mode = 'select';
+    this.createArrowEdge(from, point);
+    this.render();
   }
   queueNotePreview(path, el) {
     if (this.board.camera.z < .35) { this.notePreview(path, el); return; }
@@ -5427,8 +5780,11 @@ class AtlasView extends TextFileView {
     this.panel.createEl('h3', { text: 'Itens da seção' });
     for (const id of group.members) { const node = this.board.nodes.find(n => n.id === id); if (node) this.button(this.panel, `Retirar: ${node.title || node.path}`, 'minus', () => this.removeGroupItems(group, [id])); }
     this.button(this.panel, 'Desfazer grupo (manter os cartões)', 'ungroup', () => {
-      this.checkpoint('board'); this.board.groups = this.board.groups.filter(g => g !== group); this.selectedGroup = null;
-      this.changed(false, false); this.drawGroups(); this.showSelection();
+      this.checkpoint('board');
+      this.board.groups = this.board.groups.filter(g => g !== group);
+      this.board.edges = this.board.edges.filter(e => e.from?.group !== group.id && e.to?.group !== group.id);
+      this.selectedGroup = null;
+      this.changed(false, false); this.drawGroups(); this.drawEdges(); this.showSelection();
     });
     this.panel.createEl('p', { text: 'Para adicionar outros cartões, selecione com Shift+clique e escolha este grupo no painel. Também pode selecionar um cartão e clicar no título do grupo.' });
   }
@@ -5438,14 +5794,19 @@ class AtlasView extends TextFileView {
       this.groupsEl.empty(); this.groupElements = new Map(); this.groupGeometry = new Map();
       for (const group of this.board.groups || []) {
         const frame = this.groupsEl.createDiv({ cls: 'ia-group-frame' }); frame.style.setProperty('--ia-group-color', group.color);
+        frame.dataset.atlasGroupId = group.id;
         const title = frame.createEl('button', { cls: 'ia-group-title', text: group.title, attr: { title: 'Arraste para mover · Dois cliques para renomear' } });
         title.onpointerdown = e => {
-          if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); this.viewport.focus(); this.selectedGroup = group.id;
+          if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); this.viewport.focus();
+          if (this.mode === 'connect') { this.connect({ group: group.id }); return; }
+          this.selectedGroup = group.id;
           this.drag = { type: 'group', group, branch: this.groupContents(group).map(node => ({ node, x: node.x, y: node.y })), x: group.x, y: group.y, cx: e.clientX, cy: e.clientY, pointerId: e.pointerId, pendingCheckpoint: true };
           this.showSelection();
         };
-        title.onclick = e => { e.stopPropagation(); this.selectedGroup = group.id; this.drawGroups(true); this.showSelection(); };
+        title.onclick = e => { e.stopPropagation(); if (this.mode === 'connect') { this.connect({ group: group.id }); return; } this.selectedGroup = group.id; this.drawGroups(true); this.showSelection(); };
+        frame.onclick = e => { if (this.mode !== 'connect' || e.target.closest('button')) return; e.stopPropagation(); this.connect({ group: group.id }); };
         title.ondblclick = e => { e.stopPropagation(); new AtlasGroupModal(this, group, (name, color) => { if (!this.board.groups?.includes(group)) return; this.checkpoint('board'); group.title = name; group.color = color; this.changed(false, false); this.drawGroups(); this.showSelection(); }).open(); };
+        this.attachConnectPorts(frame, { group: group.id });
         this.groupElements.set(group.id, frame);
         this.groupGeometry.set(group.id, this.groupContents(group).filter(n => this.nodeElements?.has(n.id)));
       }
@@ -6443,12 +6804,35 @@ class AtlasView extends TextFileView {
     const source = this.board.nodes.find(n => n.id === edge.from.node), target = this.board.nodes.find(n => n.id === edge.to.node);
     const relation = edge.mindTree && (target?.relation ? target : source?.relation ? source : null);
     if (relation) { this.selected = { node: relation.id }; this.highlight(); this.showRelation(relation); return; }
-    this.clearPanel(); this.panel.createEl('h2', { text: 'Ligação visual' });
-    this.button(this.panel, edge.mindTree ? 'Nomear relação e agrupar filhos' : 'Nomear linha', 'square-pen', () => this.editEdgeLabel(edge));
+    this.clearPanel(); this.panel.createEl('h2', { text: edge.mindTree ? 'Ligação visual' : 'Seta de conexão' });
+    this.button(this.panel, edge.mindTree ? 'Nomear relação e agrupar filhos' : 'Nomear seta (rótulo)', 'square-pen', () => this.editEdgeLabel(edge));
     if (edge.label) this.panel.createEl('p', { text: edge.label });
     if (edge.mindTree) { this.panel.createEl('p', { text: 'Dê dois cliques na linha para criar uma relação, como Indicações, e adicionar vários filhos.' }); this.button(this.panel, 'Remover ramo filho do quadro', 'trash-2', () => { const node = this.board.nodes.find(n => n.id === edge.to.node); if (node) this.removeNode(node); }); return; }
-    this.panel.createEl('p', { text: 'Esta linha conecta dois pontos do seu quadro.' });
-    this.button(this.panel, 'Remover ligação', 'unlink', () => { this.checkpoint(); this.board.edges = this.board.edges.filter(e => e !== edge); this.changed(); this.render(); });
+    this.panel.createEl('h3', { text: 'Cor da seta' });
+    const swatches = this.panel.createDiv({ cls: 'ia-edge-swatches' });
+    for (const color of COLORS) {
+      const sw = swatches.createEl('button', { cls: `ia-edge-swatch${(edge.color || COLORS[0]) === color ? ' is-active' : ''}`, attr: { type: 'button', title: color } });
+      sw.style.background = color;
+      sw.onclick = () => { this.checkpoint(); edge.color = color; this.changed(); this.drawEdges(); this.showEdge(edge); this.showEdgeToolbar(edge); };
+    }
+    const isEnd = edge.arrowEnd !== false, isStart = Boolean(edge.arrowStart);
+    this.button(this.panel, `Pontas: ${isStart && isEnd ? 'Dupla (↔)' : isEnd ? 'Seta (→)' : 'Linha sem ponta (—)'}`, 'arrow-right-left', () => {
+      this.checkpoint();
+      if (isEnd && !isStart) { edge.arrowStart = true; edge.arrowEnd = true; }
+      else if (isEnd && isStart) { edge.arrowStart = false; edge.arrowEnd = false; }
+      else { edge.arrowStart = false; edge.arrowEnd = true; }
+      this.changed(); this.drawEdges(); this.showEdge(edge); this.showEdgeToolbar(edge);
+    });
+    this.button(this.panel, 'Inverter direção', 'repeat', () => {
+      this.checkpoint(); const tmp = edge.from; edge.from = edge.to; edge.to = tmp;
+      this.changed(); this.drawEdges(); this.showEdge(edge); this.showEdgeToolbar(edge);
+    });
+    const style = edge.lineStyle || 'solid';
+    this.button(this.panel, `Estilo: ${style === 'dashed' ? 'Tracejada' : style === 'dotted' ? 'Pontilhada' : 'Sólida'}`, 'minus', () => {
+      this.checkpoint(); edge.lineStyle = style === 'solid' ? 'dashed' : style === 'dashed' ? 'dotted' : 'solid';
+      this.changed(); this.drawEdges(); this.showEdge(edge); this.showEdgeToolbar(edge);
+    });
+    this.button(this.panel, 'Remover seta', 'unlink', () => { this.checkpoint(); this.board.edges = this.board.edges.filter(e => e !== edge); this.selectedEdge = null; this.hideEdgeToolbar(); this.changed(); this.render(); });
   }
   async openNote(path) { const file = this.app.vault.getFileByPath(path); if (!file) { new Notice('Nota não encontrada.'); return; } await this.app.workspace.getLeaf('split').openFile(file); }
   openWeb(node, pin) {

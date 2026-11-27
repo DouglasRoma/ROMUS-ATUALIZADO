@@ -29,7 +29,9 @@ export class NotePage{
  }
  load(raw,force=false){
   const prefix=raw.match(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/)?.[0]||'';if(!force&&this.prefix===prefix){this.raw=raw;return}this.prefix=prefix;
-  const props=propertyDocument(raw).props,data=notePageData(props),key=JSON.stringify(props);this.raw=raw;this.data=data;
+  const props=propertyDocument(raw).props,data=notePageData(props);
+  const visibleProps={};for(const [k,v]of Object.entries(props))if(k!=='image-atlas-data'&&k!=='image-atlas-source')visibleProps[k]=v;
+  const key=JSON.stringify(visibleProps);this.raw=raw;this.data=data;
   if(this.contentOnly){if(force||key!==this.key){this.key=key;this.renderHub()}return}
   if(!force&&key===this.key)return;this.key=key;this.properties.render(raw);this.renderCover();this.renderTabs();this.owner.outline?.scheduleGeometry();if(this.section!=='summary')this.renderHub();
  }

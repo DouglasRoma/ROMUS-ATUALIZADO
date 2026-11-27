@@ -53,9 +53,41 @@ export class NoteEditor extends TextFileView{
     const owner=this;this.wiki=attachWikiLinks({input:this.sourceInput,app:this.app,get file(){return owner.file},get status(){return owner.status}});this.register(()=>this.wiki.dispose());
     this.registerEvent(this.app.vault.on('rename',file=>{if(file===this.file){this.name.textContent=file.basename;this.updateLocation()}}));
     this.registerEvent(this.app.vault.on('modify',async file=>{
-      if(file!==this.file||this.formatted?.dirty||this.input.value!==this.originalBody)return;
+      if(file!==this.file)return;
       const before=this.originalBody,text=await this.app.vault.read(file);
-      if(!this.formatted?.dirty&&this.input.value===before){const next=text.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/,'');this.showProperties(text);if(next===before)return;const position=captureReadingPosition(this);this.originalBody=next;this.input.value=this.originalBody;await this.refreshContent();restoreReadingPosition(this,position)}
+      const next=text.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/,'');
+      this.showProperties(text);
+      if(next===before)return;
+      const beforeParts=splitNoteContent(before),nextParts=splitNoteContent(next);
+      // If only hidden managed blocks (like whiteboard mindmap visual data) changed on disk,
+      // sync managed blocks silently without touching user typing, TipTap DOM, or scroll position!
+      if(nextParts.text===beforeParts.text){
+        this.sourceManaged=nextParts.managed;
+        if(this.formatted)this.formatted.managed=nextParts.managed;
+        const hasPendingEdit=Boolean(this.formatted?.dirty||this.timer||this.input.value!==before);
+        if(!hasPendingEdit){
+          this.originalBody=next;
+          this.input.value=next;
+          if(this.formatted)this.formatted.loadedBody=next;
+          if(this.showStudy){
+            const savedScroll=this.pageScrollElement?.scrollTop??0;
+            await this.refreshContent();
+            if(this.pageScrollElement)this.pageScrollElement.scrollTop=savedScroll;
+          }
+        }
+        return;
+      }
+      if(this.formatted?.dirty||this.timer||this.input.value!==before)return;
+      const savedScroll=this.pageScrollElement?.scrollTop??0;
+      const position=captureReadingPosition(this);
+      this.originalBody=next;this.input.value=this.originalBody;
+      await this.refreshContent();
+      restoreReadingPosition(this,position);
+      requestAnimationFrame(()=>{
+        if(this.pageScrollElement&&Math.abs(this.pageScrollElement.scrollTop-savedScroll)>40&&position?.ratio>0.05){
+          restoreReadingPosition(this,position);
+        }
+      });
     }));
   }
   getViewType(){return'markdown'}
@@ -97,6 +129,12 @@ export class NoteEditor extends TextFileView{
         const prefix=text.match(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/)?.[0]||'';
         const diskBody=text.slice(prefix.length);
         if(diskBody!==before){
+          const visualPattern=/<!-- image-atlas-visual:start -->[\s\S]*?<!-- image-atlas-visual:end -->/;
+          const diskVisual=diskBody.match(visualPattern)?.[0];
+          if(diskVisual&&!this.showStudy){
+            if(visualPattern.test(body))body=body.replace(visualPattern,()=>diskVisual);
+            else body=body.trimEnd()+'\n\n'+diskVisual+'\n';
+          }
           const markers=diskBody.match(/<!--\s*image-atlas-[^>]*-->/g)||[];
           for(const marker of markers){
             if(!body.includes(marker))body=body.trimEnd()+'\n\n'+marker+'\n';

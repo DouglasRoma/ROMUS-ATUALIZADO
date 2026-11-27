@@ -50,7 +50,7 @@ const NoteLink=Link.extend({renderHTML(props){
  }
  return spec;
 }});
-export function mindmapCodeBlock(owner){
+export function mindmapCodeBlock(formatted){
  return CodeBlock.extend({
   addNodeView(){
    return ({node,editor,getPos})=>{
@@ -88,9 +88,9 @@ export function mindmapCodeBlock(owner){
          const tr=editor.state.tr.replaceWith(pos+1,pos+currentNode.nodeSize-1,content);
          tr.setMeta('addToHistory',false);
          editor.view.dispatch(tr);
-         owner.dirty=true;
-         owner.owner.status.textContent='Salvando…';
-         owner.flushToOwner();
+         formatted.dirty=true;
+         if(formatted.owner?.status)formatted.owner.status.textContent='Salvando…';
+         formatted.flushToOwner();
         }finally{
          isSelfDispatch=false;
         }
@@ -104,15 +104,15 @@ export function mindmapCodeBlock(owner){
        if(currentNode){
         const tr=editor.state.tr.delete(pos,pos+currentNode.nodeSize);
         editor.view.dispatch(tr);
-        owner.dirty=true;
-        owner.owner.status.textContent='Salvando…';
-        owner.flushToOwner();
+        formatted.dirty=true;
+        if(formatted.owner?.status)formatted.owner.status.textContent='Salvando…';
+        formatted.flushToOwner();
        }
       }
      };
      mindmap=new EmbeddedMindMap(wrapper,{
       data:currentText,
-      app:owner.app,
+      app:formatted.app,
       onChange:newJson=>updateNodeText(newJson),
       onRemove:()=>removeBlock()
      });
@@ -142,7 +142,7 @@ export function mindmapCodeBlock(owner){
 export class FormattedEditor{
  constructor(owner,host){
   this.owner=owner;this.app=owner.app;this.host=host;this.managed=[];
-  this.editor=new Editor({element:host,extensions:[StarterKit.configure({link:false,codeBlock:false}),mindmapCodeBlock(owner),NoteLink.configure({openOnClick:false,protocols:['atlas-note','atlas-cloze']}),Markdown,noteImage(owner),TaskList,TaskItem.configure({nested:true}),TableKit,TextPaint],content:'',contentType:'markdown',
+  this.editor=new Editor({element:host,extensions:[StarterKit.configure({link:false,codeBlock:false}),mindmapCodeBlock(this),NoteLink.configure({openOnClick:false,protocols:['atlas-note','atlas-cloze']}),Markdown,noteImage(owner),TaskList,TaskItem.configure({nested:true}),TableKit,TextPaint],content:'',contentType:'markdown',
    editorProps:{attributes:{'aria-label':'Texto formatado da nota',role:'textbox','aria-multiline':'true',spellcheck:'true'},handleKeyDown:(_,event)=>this.onKey(event)},
    onUpdate:()=>{if(this.loading||this.completeWikiLink())return;this.dirty=true;owner.status.textContent='Salvando…';clearTimeout(this.serializeTimer);this.serializeTimer=setTimeout(()=>this.flushToOwner(),280);this.scheduleLinks();this.updateSuggestions();owner.slash?.update();this.bubble?.schedule()},onSelectionUpdate:()=>{this.updateSuggestions();owner.slash?.update();this.bubble?.schedule()},onFocus:()=>this.bubble?.schedule(),onBlur:()=>requestAnimationFrame(()=>{if(!this.editor.isDestroyed)this.bubble?.schedule()})});
   this.bubble=new SelectionToolbar(this);
@@ -235,9 +235,16 @@ export class FormattedEditor{
  }
  load(body){
   if(this.loadedBody===body&&!this.dirty)return false;
-  this.loadedBody=body;this.loadCount=(this.loadCount||0)+1;
+  const {text,managed}=this.owner.plainDocument?{text:body,managed:[]}:editableDocument(body);
+  // If only hidden managed blocks (e.g. whiteboard mindmap visual data) changed, update metadata without rebuilding the editor DOM or resetting scroll.
+  if(this.loadedEditableText!==undefined&&this.loadedEditableText===text&&!this.dirty){
+   this.managed=managed;
+   this.loadedBody=body;
+   return false;
+  }
+  this.loadedBody=body;this.loadedEditableText=text;this.loadCount=(this.loadCount||0)+1;
   clearTimeout(this.serializeTimer);this.dirty=false;
-  this.closeSuggestions();this.loading=true;const {text,managed}=this.owner.plainDocument?{text:body,managed:[]}:editableDocument(body);this.managed=managed;
+  this.closeSuggestions();this.loading=true;this.managed=managed;
   const markdown=text.replace(/!\[([^\]]*)\]\((?:<([^>]+)>|([^\s)]+))(\s+"(?:\\.|[^"])*")?\)/g,(raw,alt,angle,path,title)=>{const file=this.app.metadataCache.getFirstLinkpathDest(angle||path,this.owner.file.path);return file?`![${alt}](${this.app.vault.getResourcePath(file)}${title||''})`:raw}).replace(/!\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/g,(_,target,size)=>{const file=this.app.metadataCache.getFirstLinkpathDest(target,this.owner.file.path);const width=size&&/^\d+/.test(size.trim())?size.trim().match(/^\d+/)[0]:'';const alt=width||(size?size.trim():'');return file?`![${alt}](${this.app.vault.getResourcePath(file)})`:_}).replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,(_,target,label)=>`[${noteLinkLabel(target,label).replace(/[\[\]]/g,'')}](atlas-note:${encodeURIComponent(target)})`).replace(/\{\{((?:[^{}]|(?<=\\)[{}])+)\}\}/g,(raw,inner)=>{const parts=inner.split('::');let cId='',answer=inner,label='',hint='';if(parts.length>1){if(/^c\d+$/i.test(parts[0].trim())){cId=parts[0].trim();answer=parts[1].trim();if(parts.length>=4){label=parts[2].trim();hint=parts.slice(3).join('::').trim()}else{hint=parts.slice(2).join('::').trim()}}else{answer=parts[0].trim();if(parts.length>=3){label=parts[1].trim();hint=parts.slice(2).join('::').trim()}else{hint=parts.slice(1).join('::').trim()}}}const encoded=encodeURIComponent(JSON.stringify({raw,cId,answer,label,hint}));return `[${answer}](atlas-cloze:${encoded})`});
   try{this.editor.chain().setMeta('addToHistory',false).setContent(markdown,{contentType:'markdown',emitUpdate:false}).run();this.resetHistory();this.decorateLinks()}finally{this.loading=false}
  }
@@ -248,7 +255,7 @@ export class FormattedEditor{
    text=text.replace(/\[([^\]]+)\]\(atlas-cloze:([^\s)]+)\)/g,(_,val,encoded)=>{let data={};try{data=JSON.parse(decodeURIComponent(encoded))}catch{}if(data.cId){if(data.label&&data.hint)return `{{${data.cId}::${val}::${data.label}::${data.hint}}}`;if(data.label)return `{{${data.cId}::${val}::${data.label}}}`;if(data.hint)return `{{${data.cId}::${val}::${data.hint}}}`;return `{{${data.cId}::${val}}}`}else{if(data.label&&data.hint)return `{{${val}::${data.label}::${data.hint}}}`;if(data.label)return `{{${val}::${data.label}}}`;if(data.hint)return `{{${val}::${data.hint}}}`;return `{{${val}}}`}});
   return this.owner.plainDocument?text:mergeNoteContent(text,this.managed);
  }
- flushToOwner(notify=true){clearTimeout(this.serializeTimer);if(!this.dirty||this.editor.isDestroyed)return;this.owner.input.value=this.serialize();this.loadedBody=this.owner.input.value;this.dirty=false;if(notify)this.owner.queueSave()}
+ flushToOwner(notify=true){clearTimeout(this.serializeTimer);if(!this.dirty||this.editor.isDestroyed)return;const serialized=this.serialize();this.owner.input.value=serialized;this.loadedBody=serialized;this.loadedEditableText=this.owner.plainDocument?serialized:editableDocument(serialized).text;this.dirty=false;if(notify)this.owner.queueSave()}
  scheduleLinks(){if(!this.linkFrame)this.linkFrame=requestAnimationFrame(()=>{this.linkFrame=null;if(!this.editor.isDestroyed)this.decorateLinks()})}
  decorateLinks(){
   for(const anchor of this.host.querySelectorAll('a[href^="atlas-note:"]:not([data-href])')){anchor.classList.add('internal-link');anchor.dataset.href=decodeURIComponent(anchor.getAttribute('href').slice(11))}

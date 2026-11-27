@@ -857,3 +857,185 @@ body.is-resizing-mindmap {
   border-color: var(--text-accent);
 }
 
+/* ==========================================================================
+   WHITEBOARD HEPTABASE-STYLE ARROWS & CONNECTION PORTS
+   ========================================================================== */
+.ia-line-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16px;
+  cursor: pointer;
+  pointer-events: stroke;
+}
+
+.ia-line {
+  cursor: pointer;
+  transition: stroke-width 0.12s ease, opacity 0.12s ease;
+}
+
+.ia-line.is-selected {
+  stroke-width: 3.4px !important;
+  opacity: 1 !important;
+  filter: drop-shadow(0 0 5px rgba(56, 189, 248, 0.45));
+}
+
+.ia-arrow-head {
+  cursor: pointer;
+  pointer-events: all;
+}
+
+.ia-line-preview {
+  stroke: #38bdf8;
+  stroke-width: 2.2px;
+  stroke-dasharray: 6 5;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.ia-line-preview-head {
+  fill: #38bdf8;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.ia-connect-port {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid #38bdf8;
+  background: #0f172a;
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.85);
+  opacity: 0;
+  transform: scale(0.75);
+  transition: opacity 0.14s ease, transform 0.14s ease, background 0.14s ease;
+  cursor: crosshair;
+  z-index: 30;
+  pointer-events: auto;
+}
+
+.ia-card:hover > .ia-connect-port,
+.ia-card.is-selected > .ia-connect-port,
+.ia-card.is-connect-hover > .ia-connect-port,
+.ia-group-frame:hover > .ia-connect-port,
+.ia-group-frame.is-selected > .ia-connect-port,
+.ia-group-frame.is-connect-hover > .ia-connect-port,
+.ia-viewport.mode-connect .ia-connect-port {
+  opacity: 0.92;
+  transform: scale(1);
+}
+
+.ia-connect-port:hover {
+  background: #38bdf8;
+  transform: scale(1.28) !important;
+  opacity: 1 !important;
+}
+
+.ia-connect-port.is-top {
+  top: -6px;
+  left: calc(50% - 6px);
+}
+
+.ia-connect-port.is-right {
+  right: -6px;
+  top: calc(50% - 6px);
+}
+
+.ia-connect-port.is-bottom {
+  bottom: -6px;
+  left: calc(50% - 6px);
+}
+
+.ia-connect-port.is-left {
+  left: -6px;
+  top: calc(50% - 6px);
+}
+
+.ia-card.is-connect-hover,
+.ia-group-frame.is-connect-hover,
+.ia-group-frame.is-connect-source {
+  outline: 2px solid #38bdf8 !important;
+  outline-offset: 2px;
+}
+
+.ia-viewport.mode-connect .ia-group-frame {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.ia-edge-toolbar {
+  position: absolute;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 10px;
+  background: rgba(15, 18, 24, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(8px);
+}
+
+.ia-edge-swatches {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 4px;
+  border-right: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.ia-edge-swatch {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.ia-edge-swatch:hover {
+  transform: scale(1.18);
+}
+
+.ia-edge-swatch.is-active {
+  border-color: #ffffff;
+  transform: scale(1.18);
+}
+
+.ia-edge-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ia-edge-tool-btn:hover {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(56, 189, 248, 0.45);
+  color: #ffffff;
+}
+
+.ia-edge-tool-btn.is-active {
+  background: rgba(56, 189, 248, 0.25);
+  border-color: #38bdf8;
+  color: #ffffff;
+}
+
+.ia-edge-tool-btn.is-danger:hover {
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(239, 68, 68, 0.55);
+  color: #fca5a5;
+}
+
